@@ -1,0 +1,1104 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { supabase } from "./supabase.js";
+
+// ─── BRAND ───────────────────────────────────────────────────────────────────
+const B = {
+  primary:"#2d3a8c", secondary:"#1a91c7", accent:"#f0b429",
+  dark:"#1a2057", light:"#eef0fb", success:"#059669", danger:"#dc2626",
+  warn:"#d97706", purple:"#7c3aed",
+  grad:"linear-gradient(135deg,#1a2057 0%,#2d3a8c 50%,#1a91c7 100%)",
+};
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const ROLES = { CEO:"CEO", COUNSELOR:"Counselor", PROCESSING:"Processing Officer", ACCOUNTS:"Accounts", BRANCH_MANAGER:"Branch Manager" };
+const BRANCHES = ["Lahore (HQ)","Karachi","Islamabad"];
+const COUNTRIES = ["🇬🇧 UK","🇦🇺 Australia","🇺🇸 USA","🇨🇦 Canada"];
+const LEAD_SOURCES = ["Social Media (Facebook)","Social Media (Instagram)","WhatsApp","CEO Personal Reference","Existing Client Referral","Staff Referral","Walk-in","Website","Sub-Agent","Phone Call","Other"];
+const CONTACT_TYPES = ["Call","WhatsApp","Email","Walk-in","Other"];
+const LOST_REASONS = ["IELTS Score Insufficient","Budget / Too Expensive","Went to Competitor","Visa Rejected","Changed Mind","No Response / Ghosted","University Rejected","Medical Issues","Family Decision","Other"];
+const COUNTRY_STAGES = {
+  "🇬🇧 UK":["Pending Admission","Applied for Admission","Interview Pending","Conditions Pending","Offer Letter Received","Fee Pending","CAS Pending","CAS Received","Pending FBR","Pending Medical","Pending Visa Filing","Visa Filed","Visa WON","Visa Rejected"],
+  "🇦🇺 Australia":["Pending Admission","Applied for Admission","GTE/SOP Pending","GTE Sent","Offer Letter Received","Fee Pending","COE Pending","COE Received","Pending OSHC","Pending FBR","Pending Medical","Pending Visa Filing","Visa Filed","Visa WON","Visa Rejected"],
+  "🇺🇸 USA":["Pending Admission","Applied for Admission","Interview Pending","Offer Letter Received","Fee Pending","I-20 Pending","I-20 Received","SEVIS Pending","DS-160 Pending","Pending Medical","Pending Visa Filing","Visa Filed","Visa WON","Visa Rejected"],
+  "🇨🇦 Canada":["Pending Admission","Applied for Admission","Interview Pending","Offer Letter Received","Fee Pending","CAQ Pending","CAQ Received","GIC Pending","Pending FBR","Pending Medical","Pending Visa Filing","Visa Filed","Visa WON","Visa Rejected"],
+};
+const COUNTRY_DOCS = {
+  "🇬🇧 UK":["Passport","IELTS/PTE Result","Academic Transcripts","Bank Statement (6 months)","CAS Letter","IHS Payment Receipt","TB Test Certificate","Personal Statement"],
+  "🇦🇺 Australia":["Passport","IELTS/PTE Result","Academic Transcripts","Bank Statement (3 months)","COE","OSHC Insurance","GTE Statement","Health Examination"],
+  "🇺🇸 USA":["Passport","TOEFL/IELTS Result","Academic Transcripts","Bank Statement","I-20 Form","SEVIS Fee Receipt","DS-160 Confirmation","Visa Interview Appointment"],
+  "🇨🇦 Canada":["Passport","IELTS/PTE Result","Academic Transcripts","Bank Statement","Acceptance Letter","GIC Certificate","SOP Letter","Study Permit Application"],
+};
+const WA_TEMPLATES = [
+  { id:"welcome", trigger:"Welcome / Lead Assigned", emoji:"👋", msg:(n,c)=>`Assalam-o-Alaikum ${n}! Welcome to *Border and Bridges Pvt. Ltd.* 🌐\n\nYour counselor *${c||"our team"}* will contact you within 24 hours.\n\n_Border and Bridges — Immigration and Legal Consultants_` },
+  { id:"active",  trigger:"Moved to Active (ACL)",   emoji:"✅", msg:(n,country)=>`Dear ${n},\n\nGreat news! Your file is now *active* 🎉\n\nWe have started processing your *${country||""}* application. Your counselor will keep you updated at every step.\n\n_Border and Bridges Pvt. Ltd._` },
+  { id:"docs",    trigger:"Document Requested",      emoji:"📄", msg:(n,doc)=>`Dear ${n},\n\nWe need the following document:\n\n📎 *${doc||"[Document Name]"}*\n\nPlease WhatsApp it to us at your earliest. Thank you!` },
+  { id:"filed",   trigger:"Visa Filed",              emoji:"✈️", msg:(n,country)=>`Dear ${n},\n\nYour *${country||""}* visa application has been submitted to the embassy ✅\n\nExpected decision: 4–8 weeks. We will update you immediately.\n\nStay positive! 🙏` },
+  { id:"won",     trigger:"Visa WON",                emoji:"🎊", msg:(n,country)=>`Dear ${n},\n\n*CONGRATULATIONS!* 🎊🎉\n\nYour *${country||""} visa has been APPROVED!*\n\nPlease contact your counselor for pre-departure guidance.\n\n_Team Border and Bridges_ 🌟` },
+  { id:"payment", trigger:"Payment Due",             emoji:"💳", msg:(n,amt,date)=>`Dear ${n},\n\nA payment of *PKR ${amt||"[Amount]"}* is due on *${date||"[Date]"}*.\n\nPlease contact us to arrange the transfer. Thank you! 🙏` },
+];
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const fmt = n => "PKR " + Math.round(n||0).toLocaleString();
+const tod = () => new Date().toISOString().split("T")[0];
+const addDays = (d,n) => { const dt=new Date(d); dt.setDate(dt.getDate()+n); return dt.toISOString().split("T")[0]; };
+const listC  = { GCL:"#2d3a8c", PCL:"#f59e0b", BCL:"#7c3aed", ACL:"#059669" };
+const listBg = { GCL:"#eef0fb", PCL:"#fffbeb", BCL:"#f5f3ff", ACL:"#ecfdf5" };
+const priC   = { High:"#dc2626", Medium:"#d97706", Low:"#94a3b8" };
+const roleC  = { [ROLES.CEO]:"#2d3a8c", [ROLES.COUNSELOR]:"#059669", [ROLES.PROCESSING]:"#1a91c7", [ROLES.ACCOUNTS]:"#d97706", [ROLES.BRANCH_MANAGER]:"#7c3aed" };
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const S = {
+  card: { background:"#fff", borderRadius:12, padding:20, boxShadow:"0 1px 4px rgba(45,58,140,0.07)", border:"1px solid #e8eaf6" },
+  inp:  { width:"100%", padding:"9px 12px", border:"1.5px solid #c5cae9", borderRadius:8, fontSize:13, color:"#1a2057", background:"#f8f9ff", boxSizing:"border-box", fontFamily:"inherit", outline:"none" },
+  sel:  { width:"100%", padding:"9px 12px", border:"1.5px solid #c5cae9", borderRadius:8, fontSize:13, color:"#1a2057", background:"#f8f9ff", boxSizing:"border-box", fontFamily:"inherit" },
+  btn:  (c=B.primary) => ({ display:"inline-flex", alignItems:"center", gap:6, background:c, color:"#fff", border:"none", borderRadius:8, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }),
+  ghost:{ display:"inline-flex", alignItems:"center", gap:6, background:"#f8f9ff", color:"#3949ab", border:"1px solid #c5cae9", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
+  lbl:  { display:"block", fontSize:11, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.8, marginBottom:5 },
+  th:   { textAlign:"left", padding:"10px 14px", fontSize:11, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.5, borderBottom:"2px solid #e8eaf6", background:"#f8f9ff" },
+  td:   { padding:"11px 14px", borderBottom:"1px solid #f3f4f9", fontSize:13, color:"#37474f" },
+  h2:   { margin:"0 0 3px", fontSize:20, fontWeight:800, color:B.dark },
+  sub:  { margin:0, fontSize:13, color:"#5c6bc0" },
+};
+
+// ─── UI PRIMITIVES ────────────────────────────────────────────────────────────
+const Pill = ({text,color="#2d3a8c",bg="#eef0fb"}) => <span style={{display:"inline-block",padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{text}</span>;
+const Stars = ({score,onChange}) => <div style={{display:"flex",gap:2}}>{[1,2,3,4,5].map(n=><span key={n} onClick={()=>onChange&&onChange(n)} style={{fontSize:16,cursor:onChange?"pointer":"default",color:n<=score?"#f0b429":"#e0e0e0",lineHeight:1}}>★</span>)}</div>;
+const Fld = ({label,children}) => <div style={{marginBottom:13}}><label style={S.lbl}>{label}</label>{children}</div>;
+const R2 = ({children}) => <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>{children}</div>;
+const Chk = ({label,checked,onChange}) => <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#37474f",marginBottom:8}}><input type="checkbox" checked={checked||false} onChange={onChange} style={{width:15,height:15,accentColor:B.primary}}/>{label}</label>;
+const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c5100"},error:{bg:"#fce4ec",b:"#e91e63",t:"#880e4f"},info:{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"},success:{bg:"#e8f5e9",b:"#43a047",t:"#1b5e20"}}[type]||{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"}; return <div style={{background:c.bg,border:`1px solid ${c.b}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:c.t,marginBottom:12}}>{msg}</div>; };
+const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
+const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:40,color:"#7986cb",fontSize:13}}>Loading…</div>;
+const Modal = ({title,onClose,children,w=540}) => (
+  <div style={{position:"fixed",inset:0,background:"rgba(26,32,87,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div style={{background:"#fff",borderRadius:16,width:"100%",maxWidth:w,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(26,32,87,0.25)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 22px 14px",borderBottom:"1px solid #e8eaf6",position:"sticky",top:0,background:"#fff",zIndex:1}}>
+        <h3 style={{margin:0,fontSize:15,fontWeight:800,color:B.dark}}>{title}</h3>
+        <button onClick={onClose} style={{background:"#eef0fb",border:"none",borderRadius:7,padding:"5px 9px",cursor:"pointer",color:"#5c6bc0",fontSize:15}}>✕</button>
+      </div>
+      <div style={{padding:"18px 22px 22px"}}>{children}</div>
+    </div>
+  </div>
+);
+
+// ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError("");
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setError(err.message); setLoading(false); return; }
+    onLogin(data.user);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:B.grad,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 24px 60px rgba(26,32,87,0.35)"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <svg width="56" height="56" viewBox="0 0 100 100" fill="none" style={{margin:"0 auto 14px"}}>
+            <circle cx="50" cy="50" r="46" stroke="#1a91c7" strokeWidth="5" fill="#1a2057"/>
+            <path d="M32 50 Q42 33 50 38 Q58 33 68 50" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
+            <path d="M38 46 Q44 35 50 38 Q56 35 62 46" stroke="#1a91c7" strokeWidth="3" fill="none" strokeLinecap="round"/>
+          </svg>
+          <div style={{fontSize:20,fontWeight:900,color:B.dark}}>Border and Bridges</div>
+          <div style={{fontSize:13,color:"#7986cb",marginTop:2}}>Pvt. Ltd. — Staff Portal</div>
+        </div>
+        <form onSubmit={handleLogin}>
+          <Fld label="Email Address">
+            <input style={S.inp} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@borderandbridges.pk" required autoFocus/>
+          </Fld>
+          <Fld label="Password">
+            <input style={S.inp} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" required/>
+          </Fld>
+          {error && <Alert type="error" msg={error}/>}
+          <button type="submit" disabled={loading} style={{...S.btn(),width:"100%",justifyContent:"center",padding:13,fontSize:14,marginTop:4,opacity:loading?0.7:1}}>
+            {loading ? "Signing in…" : "Sign In →"}
+          </button>
+        </form>
+        <div style={{textAlign:"center",marginTop:16,fontSize:12,color:"#9fa8da"}}>Contact CEO to get your login credentials</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── HOOK: useDB — generic Supabase CRUD ──────────────────────────────────────
+function useTable(tableName, options = {}) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    let q = supabase.from(tableName).select("*");
+    if (options.orderBy) q = q.order(options.orderBy, { ascending: options.asc ?? false });
+    const { data: rows } = await q;
+    setData(rows || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [tableName]);
+
+  const insert = async (row) => {
+    const { data: newRow, error } = await supabase.from(tableName).insert(row).select().single();
+    if (!error) { setData(p => [newRow, ...p]); return newRow; }
+    console.error(error); return null;
+  };
+
+  const update = async (id, changes) => {
+    const { error } = await supabase.from(tableName).update(changes).eq("id", id);
+    if (!error) setData(p => p.map(r => r.id === id ? { ...r, ...changes } : r));
+  };
+
+  const remove = async (id) => {
+    await supabase.from(tableName).delete().eq("id", id);
+    setData(p => p.filter(r => r.id !== id));
+  };
+
+  return { data, setData, loading, insert, update, remove, reload: load };
+}
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+function Dashboard({ leads, invoices, tasks, currentUser }) {
+  const rev = invoices.reduce((a,i)=>a+(i.paid||0),0);
+  const pending = leads.filter(l=>l.pending_approval&&!l.approved);
+  const openT = tasks.filter(t=>!t.done);
+  const overdue = tasks.filter(t=>!t.done&&t.due_date<tod());
+  const won = leads.filter(l=>l.stage==="Visa WON").length;
+  const pipeline = ["GCL","PCL","BCL","ACL"].map(list=>({list,count:leads.filter(l=>l.list===list&&!l.lost).length}));
+
+  return (
+    <div>
+      <div style={{marginBottom:22}}>
+        <h2 style={S.h2}>Welcome, {currentUser.name} 👋</h2>
+        <p style={S.sub}>Border and Bridges Pvt. Ltd. · {tod()}</p>
+      </div>
+      {currentUser.role===ROLES.CEO&&pending.length>0&&<Alert type="warn" msg={`⚠️ ${pending.length} lead(s) pending your assignment`}/>}
+      {overdue.length>0&&<Alert type="error" msg={`🔴 ${overdue.length} task(s) are overdue`}/>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(165px,1fr))",gap:14,marginBottom:22}}>
+        <Stat label="Total Leads" value={leads.filter(l=>!l.lost).length} sub={`${leads.filter(l=>l.list==="ACL").length} active`} color={B.primary} icon="👥"/>
+        <Stat label="Visa WON" value={won} sub={`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`} color={B.success} icon="✈️"/>
+        <Stat label="Collected" value={`${Math.round(rev/1000)}K PKR`} color={B.secondary} icon="💰"/>
+        <Stat label="Open Tasks" value={openT.length} sub={`${overdue.length} overdue`} color={overdue.length>0?B.danger:B.warn} icon="✅"/>
+        <Stat label="Pending CEO" value={pending.length} color="#7c3aed" icon="⏳"/>
+        <Stat label="Win Rate" value={leads.length>0?Math.round((won/leads.length)*100)+"%":"—"} color={B.accent} icon="📈"/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:18}}>
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:16}}>Pipeline</div>
+          {pipeline.map(p=>(
+            <div key={p.list} style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                <span style={{fontSize:13,fontWeight:700,color:B.dark}}>{p.list} <span style={{fontSize:11,color:"#9fa8da",fontWeight:400}}>{p.list==="GCL"?"Enquiries":p.list==="PCL"?"Prospects":p.list==="BCL"?"Agent Leads":"Active"}</span></span>
+                <span style={{fontSize:15,fontWeight:800,color:listC[p.list]}}>{p.count}</span>
+              </div>
+              <div style={{background:"#eef0fb",borderRadius:6,height:8}}>
+                <div style={{background:listC[p.list],borderRadius:6,height:8,width:`${Math.max((p.count/Math.max(leads.length,1))*100,3)}%`}}/>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:14}}>Upcoming Tasks</div>
+          {openT.slice(0,6).map(t=>(
+            <div key={t.id} style={{display:"flex",gap:10,marginBottom:10,paddingBottom:10,borderBottom:"1px solid #f3f4f9"}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:priC[t.priority]||"#94a3b8",marginTop:5,flexShrink:0}}/>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:B.dark,lineHeight:1.3}}>{t.title}</div>
+                <div style={{fontSize:11,color:t.due_date<tod()?"#dc2626":"#9fa8da"}}>Due: {t.due_date||"—"}</div>
+              </div>
+            </div>
+          ))}
+          {openT.length===0&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:16}}>All caught up! 🎉</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LEADS ───────────────────────────────────────────────────────────────────
+function Leads({ leads, leadsDB, tasks, tasksDB, users, agents, currentUser }) {
+  const [tab, setTab] = useState("GCL");
+  const [showAdd, setShowAdd] = useState(false);
+  const [sel, setSel] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteType, setNoteType] = useState("Call");
+  const EF = {name:"",phone:"",email:"",country:"🇬🇧 UK",source:"Social Media (Facebook)",branch:currentUser.branch,type:"B2C",agent_id:"",ielts_score:"",intake_target:""};
+  const [form, setForm] = useState(EF);
+
+  const filtered = useMemo(()=>leads.filter(l=>{
+    if(l.lost) return false;
+    if(l.list!==tab) return false;
+    if(currentUser.role===ROLES.COUNSELOR) return l.assigned_to===currentUser.id;
+    if(currentUser.role===ROLES.BRANCH_MANAGER) return l.branch===currentUser.branch;
+    return true;
+  }),[leads,tab,currentUser]);
+
+  const pending = leads.filter(l=>l.pending_approval&&!l.approved);
+  const counselors = users.filter(u=>u.role===ROLES.COUNSELOR&&u.active);
+
+  const addLead = async () => {
+    if(!form.name||!form.phone) return;
+    const newL = { ...form, list:"GCL", stage:"New Enquiry", score:3, consultation_done:false, agreement_signed:false, payment_received:false, invoice_generated:false, all_doc_received:false, pending_approval:currentUser.role!==ROLES.CEO, approved:currentUser.role===ROLES.CEO, lost:false, last_contact:tod(), notes:[], docs:{}, ielts_score:form.ielts_score||null, intake_target:form.intake_target||null, agent_id:form.agent_id||null };
+    const saved = await leadsDB.insert(newL);
+    if(saved){
+      await tasksDB.insert({title:`Follow up: ${form.name} (2-day auto)`,client_name:form.name,lead_id:saved.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
+    }
+    setForm(EF); setShowAdd(false);
+  };
+
+  const assign = async (lead, uid) => {
+    await leadsDB.update(lead.id,{assigned_to:uid,approved:true,pending_approval:false});
+  };
+
+  const moveList = async (lead, nl) => {
+    if((nl==="PCL"||nl==="BCL")&&!lead.consultation_done){alert("⛔ Complete consultation first.");return;}
+    if(nl==="ACL"){
+      const miss=[];
+      if(!lead.consultation_done) miss.push("Consultation Done");
+      if(!lead.agreement_signed) miss.push("Agreement Signed");
+      if(!lead.payment_received) miss.push("Payment Received");
+      if(!lead.invoice_generated) miss.push("Invoice Generated");
+      if(miss.length){alert("⛔ Cannot move to ACL.\nMissing:\n• "+miss.join("\n• "));return;}
+    }
+    await leadsDB.update(lead.id,{list:nl});
+    setSel(null);
+  };
+
+  const addNote = async (lead) => {
+    if(!noteText.trim()) return;
+    const note = {id:Date.now(),text:noteText,by:currentUser.name,at:new Date().toLocaleString(),type:noteType};
+    const updated = [...(lead.notes||[]),note];
+    await leadsDB.update(lead.id,{notes:updated,last_contact:tod()});
+    setSel(p=>({...p,notes:updated}));
+    if(lead.list!=="ACL"){
+      await tasksDB.insert({title:`Follow up: ${lead.name} (2-day auto)`,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to||currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
+    }
+    setNoteText("");
+  };
+
+  const toggle = async (lead, field) => {
+    const val = !lead[field];
+    await leadsDB.update(lead.id,{[field]:val});
+    setSel(p=>p?{...p,[field]:val}:p);
+  };
+
+  const setScore = async (lead, score) => {
+    await leadsDB.update(lead.id,{score});
+    setSel(p=>p?{...p,score}:p);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Leads Management</h2><p style={S.sub}>{leads.filter(l=>!l.lost).length} total · {pending.length} pending approval</p></div>
+        <button style={S.btn()} onClick={()=>setShowAdd(true)}>+ Add Lead</button>
+      </div>
+
+      {currentUser.role===ROLES.CEO&&pending.length>0&&(
+        <div style={{...S.card,marginBottom:18,borderLeft:`4px solid ${B.accent}`}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#7c5100",marginBottom:10}}>⏳ {pending.length} Lead(s) Awaiting Assignment</div>
+          {pending.map(lead=>(
+            <div key={lead.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #fef3c7"}}>
+              <div><span style={{fontWeight:700,fontSize:13,color:B.dark}}>{lead.name}</span><span style={{fontSize:12,color:"#9fa8da",marginLeft:8}}>{lead.source} · {lead.country}</span></div>
+              <div style={{display:"flex",gap:6}}>{counselors.map(c=><button key={c.id} onClick={()=>assign(lead,c.id)} style={S.btn("#059669")}>→ {c.name.split(" ")[0]}</button>)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {["GCL","PCL","BCL","ACL"].map(l=>(
+          <button key={l} onClick={()=>setTab(l)} style={{padding:"8px 18px",borderRadius:8,border:"2px solid",borderColor:tab===l?listC[l]:"#c5cae9",background:tab===l?listBg[l]:"#fff",color:tab===l?listC[l]:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            {l} ({leads.filter(ld=>ld.list===l&&!ld.lost).length})
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Name","Country","Stage","Score","Last Contact","Assigned",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {filtered.map(lead=>{
+              const counselor=users.find(u=>u.id===lead.assigned_to);
+              const days=Math.floor((new Date()-new Date(lead.last_contact))/86400000);
+              return (
+                <tr key={lead.id}>
+                  <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
+                  <td style={S.td}>{lead.country}<div style={{fontSize:11,color:"#9fa8da"}}>{lead.intake_target}</div></td>
+                  <td style={S.td}><Pill text={lead.stage} color="#37474f" bg="#f3f4f9"/></td>
+                  <td style={S.td}><Stars score={lead.score||3}/></td>
+                  <td style={S.td}><span style={{fontSize:12,fontWeight:600,color:days>2&&lead.list!=="ACL"?"#dc2626":"#37474f"}}>{lead.last_contact}{days>2&&lead.list!=="ACL"&&<div style={{fontSize:10,color:"#dc2626",fontWeight:700}}>⚠️ {days}d ago</div>}</span></td>
+                  <td style={S.td}>{counselor?<span style={{fontSize:12,fontWeight:600}}>{counselor.name}</span>:<span style={{fontSize:12,color:"#dc2626"}}>Unassigned</span>}</td>
+                  <td style={S.td}><button onClick={()=>setSel({...lead})} style={{...S.ghost,fontSize:11,padding:"5px 10px"}}>Open</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No leads in {tab}</div>}
+      </div>
+
+      {sel&&(
+        <Modal title={`${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={660}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
+            {[["Phone",sel.phone],["Email",sel.email||"—"],["Source",sel.source],["Branch",sel.branch],["IELTS",sel.ielts_score||"—"],["Intake",sel.intake_target||"—"]].map(([k,v])=>(
+              <div key={k}><div style={S.lbl}>{k}</div><div style={{fontSize:13,fontWeight:600,color:B.dark}}>{v}</div></div>
+            ))}
+          </div>
+          <div style={{marginBottom:14}}><div style={S.lbl}>Lead Score</div><Stars score={sel.score||3} onChange={s=>setScore(sel,s)}/></div>
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#5c6bc0",textTransform:"uppercase",marginBottom:10}}>Checklist</div>
+            {[{f:"consultation_done",l:"Consultation Done"},{f:"agreement_signed",l:"Agreement Signed"},{f:"payment_received",l:"Payment Received"},{f:"invoice_generated",l:"Invoice Generated"},{f:"all_doc_received",l:"All Documents Received"}].map(item=>(
+              <Chk key={item.f} label={item.l} checked={sel[item.f]||false} onChange={()=>toggle(sel,item.f)}/>
+            ))}
+          </div>
+          {currentUser.role===ROLES.CEO&&(
+            <div style={{marginBottom:14}}>
+              <div style={S.lbl}>Move to List</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {["GCL","PCL","BCL","ACL"].filter(l=>l!==sel.list).map(l=><button key={l} onClick={()=>moveList(sel,l)} style={S.btn(listC[l])}>→ {l}</button>)}
+              </div>
+            </div>
+          )}
+          {currentUser.role===ROLES.CEO&&(
+            <div style={{marginBottom:16}}>
+              <div style={S.lbl}>Assign Counselor</div>
+              <select style={S.sel} value={sel.assigned_to||""} onChange={e=>{assign(sel,e.target.value);setSel(p=>({...p,assigned_to:e.target.value}))}}>
+                <option value="">-- Select --</option>
+                {counselors.map(c=><option key={c.id} value={c.id}>{c.name} ({c.branch})</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{borderTop:"1px solid #e8eaf6",paddingTop:16}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📝 Notes Timeline</div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <select value={noteType} onChange={e=>setNoteType(e.target.value)} style={{...S.sel,width:110,flexShrink:0}}>{CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+              <input style={{...S.inp,flex:1}} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={`Add ${noteType} note…`} onKeyDown={e=>e.key==="Enter"&&addNote(sel)}/>
+              <button onClick={()=>addNote(sel)} style={{...S.btn(),flexShrink:0}}>Add</button>
+            </div>
+            <div style={{maxHeight:200,overflowY:"auto"}}>
+              {[...(sel.notes||[])].reverse().map(note=>(
+                <div key={note.id} style={{display:"flex",gap:10,marginBottom:10}}>
+                  <div style={{width:32,height:32,borderRadius:"50%",background:B.light,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:B.primary,flexShrink:0}}>{note.by?.charAt(0)}</div>
+                  <div style={{flex:1,background:"#f8f9ff",borderRadius:10,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span><div style={{display:"flex",gap:6}}><Pill text={note.type} color="#3949ab" bg="#e8eaf6"/><span style={{fontSize:10,color:"#9fa8da"}}>{note.at}</span></div></div>
+                    <div style={{fontSize:13,color:"#37474f"}}>{note.text}</div>
+                  </div>
+                </div>
+              ))}
+              {!(sel.notes||[]).length&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:12}}>No notes yet.</div>}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showAdd&&(
+        <Modal title="Add New Lead" onClose={()=>setShowAdd(false)}>
+          <Fld label="Full Name"><input style={S.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Client full name"/></Fld>
+          <R2><Fld label="Phone"><input style={S.inp} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+92 300 …"/></Fld><Fld label="Email"><input style={S.inp} value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></Fld></R2>
+          <R2><Fld label="Country"><select style={S.sel} value={form.country} onChange={e=>setForm({...form,country:e.target.value})}>{COUNTRIES.map(c=><option key={c}>{c}</option>)}</select></Fld><Fld label="Source"><select style={S.sel} value={form.source} onChange={e=>setForm({...form,source:e.target.value})}>{LEAD_SOURCES.map(s=><option key={s}>{s}</option>)}</select></Fld></R2>
+          <R2><Fld label="Branch"><select style={S.sel} value={form.branch} onChange={e=>setForm({...form,branch:e.target.value})}>{BRANCHES.map(b=><option key={b}>{b}</option>)}</select></Fld><Fld label="Type"><select style={S.sel} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option value="B2C">B2C — Direct</option><option value="B2B">B2B — Via Agent</option></select></Fld></R2>
+          <R2><Fld label="IELTS/PTE Score"><input style={S.inp} value={form.ielts_score} onChange={e=>setForm({...form,ielts_score:e.target.value})} placeholder="e.g. 6.5"/></Fld><Fld label="Target Intake"><input style={S.inp} value={form.intake_target} onChange={e=>setForm({...form,intake_target:e.target.value})} placeholder="Sep 2026"/></Fld></R2>
+          <Alert type="info" msg="Lead enters GCL and awaits CEO assignment. A 2-day follow-up task is created automatically."/>
+          <button onClick={addLead} style={{...S.btn(),width:"100%",justifyContent:"center",padding:12}}>Submit Lead</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── CASES ───────────────────────────────────────────────────────────────────
+function Cases({ leads, leadsDB, tasksDB, currentUser }) {
+  const [sel, setSel] = useState(null);
+  const acl = leads.filter(l=>l.list==="ACL"&&!l.lost);
+
+  const changeStage = async (lead, ns) => {
+    if(ns==="Applied for Admission"&&!lead.all_doc_received){alert("⛔ All documents must be received first.");return;}
+    if(ns==="Case Closed"&&lead.stage!=="Visa WON"&&!lead.stage?.includes("Refund")){alert("⛔ Only close after Visa WON or Refund.");return;}
+    await leadsDB.update(lead.id,{stage:ns});
+    await tasksDB.insert({title:`${lead.name}: moved to "${ns}"`,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to,due_date:tod(),priority:"Medium",type:"Follow-up",auto_generated:true});
+    setSel(null);
+  };
+
+  const toggleDoc = async (lead, doc) => {
+    const key = `doc_${doc}`;
+    const docs = {...(lead.docs||{}), [key]:!lead.docs?.[key]};
+    await leadsDB.update(lead.id,{docs});
+    setSel(p=>p?{...p,docs}:p);
+  };
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Active Cases (ACL)</h2><p style={S.sub}>{acl.length} active cases</p></div>
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Client","Country","Stage","Docs","Branch",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {acl.map(lead=>(
+              <tr key={lead.id}>
+                <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
+                <td style={S.td}>{lead.country}<div style={{fontSize:11,color:"#9fa8da"}}>{lead.intake_target}</div></td>
+                <td style={S.td}><Pill text={lead.stage} color="#37474f" bg="#f3f4f9"/></td>
+                <td style={S.td}>{lead.all_doc_received?<span style={{color:B.success,fontWeight:700,fontSize:12}}>Complete ✓</span>:<span style={{color:B.warn,fontSize:12}}>Pending</span>}</td>
+                <td style={S.td}><span style={{fontSize:12}}>{lead.branch?.split(" ")[0]}</span></td>
+                <td style={S.td}><button onClick={()=>setSel({...lead})} style={S.btn(B.secondary)}>Manage</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {acl.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No active cases yet.</div>}
+      </div>
+
+      {sel&&(
+        <Modal title={`Case: ${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={660}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            <div style={{...S.card,padding:12}}><div style={S.lbl}>Current Stage</div><Pill text={sel.stage} color={B.primary} bg={B.light}/></div>
+            <div style={{...S.card,padding:12}}><div style={S.lbl}>IELTS/PTE</div><div style={{fontSize:14,fontWeight:800,color:B.dark}}>{sel.ielts_score||"—"}</div></div>
+          </div>
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#5c6bc0",textTransform:"uppercase",marginBottom:10}}>Documents — {sel.country}</div>
+            {(COUNTRY_DOCS[sel.country]||[]).map(doc=>(
+              <Chk key={doc} label={doc} checked={sel.docs?.[`doc_${doc}`]||false} onChange={()=>toggleDoc(sel,doc)}/>
+            ))}
+          </div>
+          <div style={S.lbl}>Move to Stage</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",maxHeight:200,overflowY:"auto"}}>
+            {(COUNTRY_STAGES[sel.country]||[]).map(stage=>(
+              <button key={stage} onClick={()=>changeStage(sel,stage)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── TASKS ───────────────────────────────────────────────────────────────────
+function Tasks({ tasks, tasksDB, users, currentUser }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
+  const mine = tasks.filter(t=>currentUser.role===ROLES.CEO||t.assigned_to===currentUser.id);
+  const open = mine.filter(t=>!t.done).sort((a,b)=>{ if(a.due_date<tod()&&b.due_date>=tod()) return -1; if(b.due_date<tod()&&a.due_date>=tod()) return 1; return (a.due_date||"").localeCompare(b.due_date||""); });
+  const done = mine.filter(t=>t.done);
+
+  const addTask = async () => {
+    if(!form.title) return;
+    await tasksDB.insert({...form,done:false,auto_generated:false});
+    setShowAdd(false); setForm({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Tasks & Follow-ups</h2><p style={S.sub}>{open.length} open · {open.filter(t=>t.due_date<tod()).length} overdue</p></div>
+        <button style={S.btn("#7c3aed")} onClick={()=>setShowAdd(true)}>+ Add Task</button>
+      </div>
+      <div style={{display:"grid",gap:9,marginBottom:20}}>
+        {open.map(t=>{
+          const od=t.due_date&&t.due_date<tod();
+          return (
+            <div key={t.id} style={{...S.card,display:"flex",alignItems:"center",gap:14,padding:"12px 16px",borderLeft:`4px solid ${od?B.danger:priC[t.priority]||"#94a3b8"}`}}>
+              <button onClick={()=>tasksDB.update(t.id,{done:true})} style={{width:22,height:22,borderRadius:6,border:`2px solid ${od?B.danger:"#c5cae9"}`,background:"#fff",cursor:"pointer",flexShrink:0}}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{t.title}{t.auto_generated&&<span style={{fontSize:10,color:"#9fa8da",marginLeft:6}}>🤖 auto</span>}</div>
+                <div style={{fontSize:11,color:"#9fa8da",marginTop:2}}>{t.client_name&&`${t.client_name} · `}<span style={{color:od?"#dc2626":"#9fa8da",fontWeight:od?700:400}}>{od?`⚠️ Overdue since ${t.due_date}`:`Due: ${t.due_date||"—"}`}</span></div>
+              </div>
+              <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
+            </div>
+          );
+        })}
+        {open.length===0&&<div style={{...S.card,textAlign:"center",color:"#9fa8da",padding:32}}>All caught up! 🎉</div>}
+      </div>
+      {done.length>0&&(
+        <div>
+          <div style={{fontSize:12,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:10}}>Completed ({done.length})</div>
+          {done.slice(0,5).map(t=><div key={t.id} style={{...S.card,display:"flex",alignItems:"center",gap:12,padding:"10px 16px",opacity:0.5,marginBottom:8}}><span style={{color:B.success}}>✓</span><span style={{fontSize:13,textDecoration:"line-through",color:"#9fa8da"}}>{t.title}</span></div>)}
+        </div>
+      )}
+      {showAdd&&(
+        <Modal title="Add Task" onClose={()=>setShowAdd(false)}>
+          <Fld label="Task"><input style={S.inp} value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Task description…"/></Fld>
+          <R2><Fld label="Client"><input style={S.inp} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Optional"/></Fld><Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld></R2>
+          <R2><Fld label="Priority"><select style={S.sel} value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option>High</option><option>Medium</option><option>Low</option></select></Fld><Fld label="Type"><select style={S.sel} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Follow-up</option><option>Docs</option><option>Visa</option><option>Application</option><option>Finance</option><option>Other</option></select></Fld></R2>
+          {currentUser.role===ROLES.CEO&&<Fld label="Assign To"><select style={S.sel} value={form.assigned_to} onChange={e=>setForm({...form,assigned_to:e.target.value})}>{users.map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></Fld>}
+          <button onClick={addTask} style={{...S.btn("#7c3aed"),width:"100%",justifyContent:"center",padding:12}}>Add Task</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── INVOICES ────────────────────────────────────────────────────────────────
+function Invoices({ invoices, invoicesDB, leads, currentUser }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({client_name:"",service:"",amount:"",paid:0,invoice_date:tod(),due_date:"",account_code:"4100"});
+  if(currentUser.role!==ROLES.CEO&&currentUser.role!==ROLES.ACCOUNTS) return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+
+  const total=invoices.reduce((a,i)=>a+(i.amount||0),0);
+  const collected=invoices.reduce((a,i)=>a+(i.paid||0),0);
+  const aging={"0–30":0,"31–60":0,"61–90":0,"90+":0};
+  invoices.filter(i=>i.status!=="Paid").forEach(inv=>{
+    const days=Math.floor((new Date()-new Date(inv.due_date))/86400000);
+    const bal=(inv.amount||0)-(inv.paid||0);
+    if(days<=30)aging["0–30"]+=bal;else if(days<=60)aging["31–60"]+=bal;else if(days<=90)aging["61–90"]+=bal;else aging["90+"]+=bal;
+  });
+
+  const add = async () => {
+    if(!form.client_name||!form.amount) return;
+    const amt=+form.amount,paid=+form.paid;
+    await invoicesDB.insert({...form,amount:amt,paid,status:paid===0?"Unpaid":paid>=amt?"Paid":"Partial",created_by:currentUser.id});
+    setShowAdd(false); setForm({client_name:"",service:"",amount:"",paid:0,invoice_date:tod(),due_date:"",account_code:"4100"});
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Invoices & Payments</h2><p style={S.sub}>{invoices.length} invoices</p></div>
+        {currentUser.role===ROLES.CEO&&<button style={S.btn("#dc2626")} onClick={()=>setShowAdd(true)}>+ New Invoice</button>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:20}}>
+        <Stat label="Total Billed" value={fmt(total)} color={B.dark}/><Stat label="Collected" value={fmt(collected)} color={B.success}/><Stat label="Outstanding" value={fmt(total-collected)} color="#dc2626"/>
+      </div>
+      <div style={{...S.card,marginBottom:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Accounts Receivable Aging</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+          {Object.entries(aging).map(([range,amt])=>(
+            <div key={range} style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center",borderLeft:`3px solid ${range==="90+"?"#dc2626":range==="61–90"?"#d97706":range==="31–60"?"#f0b429":"#059669"}`}}>
+              <div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:6}}>{range} days</div>
+              <div style={{fontSize:18,fontWeight:800,color:range==="90+"?"#dc2626":B.dark}}>{fmt(amt)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Client","Service","Billed","Paid","Balance","Due","Status"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {invoices.map(inv=>{
+              const bal=(inv.amount||0)-(inv.paid||0);
+              const [sc,sb]={Paid:["#065f46","#d1fae5"],Partial:["#7c5100","#fef3c7"],Unpaid:["#9b1c1c","#fee2e2"]}[inv.status]||["#37474f","#f3f4f9"];
+              return <tr key={inv.id}><td style={S.td}><div style={{fontWeight:700}}>{inv.client_name}</div></td><td style={S.td}>{inv.service}</td><td style={S.td}>{fmt(inv.amount)}</td><td style={{...S.td,color:B.success,fontWeight:700}}>{fmt(inv.paid)}</td><td style={{...S.td,color:bal>0?"#dc2626":B.success,fontWeight:700}}>{fmt(bal)}</td><td style={S.td}>{inv.due_date}</td><td style={S.td}><Pill text={inv.status} color={sc} bg={sb}/></td></tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      {showAdd&&(
+        <Modal title="New Invoice" onClose={()=>setShowAdd(false)}>
+          <Fld label="Client"><select style={S.sel} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})}><option value="">-- ACL Client --</option>{leads.filter(l=>l.list==="ACL").map(l=><option key={l.id}>{l.name}</option>)}</select></Fld>
+          <Fld label="Service"><input style={S.inp} value={form.service} onChange={e=>setForm({...form,service:e.target.value})}/></Fld>
+          <R2><Fld label="Total (PKR)"><input type="number" style={S.inp} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></Fld><Fld label="Paid (PKR)"><input type="number" style={S.inp} value={form.paid} onChange={e=>setForm({...form,paid:e.target.value})}/></Fld></R2>
+          <R2><Fld label="Invoice Date"><input type="date" style={S.inp} value={form.invoice_date} onChange={e=>setForm({...form,invoice_date:e.target.value})}/></Fld><Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld></R2>
+          <button onClick={add} style={{...S.btn("#dc2626"),width:"100%",justifyContent:"center",padding:12}}>Create Invoice</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ACCOUNTING (simplified for production) ───────────────────────────────────
+function Accounting({ accounts, accountsDB, journals, journalsDB, bankTx, bankTxDB, invoices, currentUser }) {
+  const [tab, setTab] = useState("ledger");
+  const [showJV, setShowJV] = useState(false);
+  const [jvLines, setJvLines] = useState([{account:"",dr:0,cr:0},{account:"",dr:0,cr:0}]);
+  const [jvNarr, setJvNarr] = useState("");
+  const [jvDate, setJvDate] = useState(tod());
+  const fileRef = useRef();
+  if(currentUser.role!==ROLES.CEO&&currentUser.role!==ROLES.ACCOUNTS) return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+
+  const leaf = accounts.filter(a=>!a.is_parent);
+  const getBalance = (code) => {
+    let bal = accounts.find(a=>a.code===code)?.opening_balance||0;
+    journals.forEach(j=>{ (j.lines||[]).forEach(l=>{ if(l.account===code) bal+=((l.dr||0)-(l.cr||0)); }); });
+    return bal;
+  };
+
+  const jvDr=jvLines.reduce((a,l)=>a+(+l.dr||0),0);
+  const jvCr=jvLines.reduce((a,l)=>a+(+l.cr||0),0);
+  const jvOk=Math.abs(jvDr-jvCr)<0.01&&jvNarr;
+
+  const postJV = async () => {
+    if(!jvOk) return;
+    await journalsDB.insert({ref:`JV-${String(journals.length+1).padStart(3,"0")}`,journal_date:jvDate,narrative:jvNarr,lines:jvLines.filter(l=>l.account&&(l.dr||l.cr)).map(l=>({...l,dr:+l.dr,cr:+l.cr})),posted:true,created_by:currentUser.id});
+    setJvLines([{account:"",dr:0,cr:0},{account:"",dr:0,cr:0}]); setJvNarr(""); setShowJV(false);
+  };
+
+  const importBank = e => {
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const lines=ev.target.result.split("\n").filter(l=>l.trim());
+      for(const line of lines.slice(1)){
+        const [date,description,credit,debit,balance]=line.split(",");
+        if(!description?.trim()) continue;
+        await bankTxDB.insert({transaction_date:(date||"").trim(),description:(description||"").trim(),credit:parseFloat(credit)||0,debit:parseFloat(debit)||0,balance:parseFloat(balance)||0,matched:false});
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const dlBank = () => {
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["date,description,credit,debit,balance\n2026-04-01,TT from Client,45000,0,120000\n2026-04-02,Office Rent,0,25000,95000"],{type:"text/csv"})); a.download="bank_template.csv"; a.click();
+  };
+
+  const tbRows=leaf.map(a=>({...a,balance:getBalance(a.code)})).filter(a=>a.balance!==0);
+  const tbDr=tbRows.reduce((s,a)=>s+(a.balance>0&&["Asset","Expense"].includes(a.type)?a.balance:0),0);
+  const tbCr=tbRows.reduce((s,a)=>s+(a.balance>0&&["Liability","Income","Equity"].includes(a.type)?a.balance:0),0);
+  const typeC={Asset:B.primary,Liability:"#dc2626",Equity:"#7c3aed",Income:"#059669",Expense:"#d97706"};
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Accounting</h2><p style={S.sub}>Double-entry bookkeeping · Trial Balance · Bank Reconciliation</p></div>
+      <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
+        {[["ledger","Trial Balance"],["jvlist","Journal Vouchers"],["bank","Bank Import"],["collections","Expected Collections"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid",borderColor:tab===k?B.primary:"#c5cae9",background:tab===k?B.light:"#fff",color:tab===k?B.primary:"#5c6bc0",fontSize:12,fontWeight:700,cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+
+      {tab==="ledger"&&(
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Trial Balance — Live</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{["Code","Account","Type","Debit","Credit"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {tbRows.map((a,i)=>{ const isDr=["Asset","Expense"].includes(a.type); return <tr key={i}><td style={{...S.td,fontFamily:"monospace",color:"#7986cb",fontWeight:700}}>{a.code}</td><td style={S.td}>{a.name}</td><td style={S.td}><Pill text={a.type} color={typeC[a.type]} bg={typeC[a.type]+"18"}/></td><td style={{...S.td,color:"#dc2626",fontWeight:700}}>{isDr?fmt(Math.abs(a.balance)):"—"}</td><td style={{...S.td,color:B.success,fontWeight:700}}>{!isDr?fmt(Math.abs(a.balance)):"—"}</td></tr>; })}
+            </tbody>
+          </table>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:24,padding:"14px 0 0",borderTop:"2px solid #e8eaf6",marginTop:10}}>
+            <span style={{fontSize:13,fontWeight:700}}>Total Debits: <span style={{color:"#dc2626"}}>{fmt(tbDr)}</span></span>
+            <span style={{fontSize:13,fontWeight:700}}>Total Credits: <span style={{color:B.success}}>{fmt(tbCr)}</span></span>
+            <span style={{fontSize:13,fontWeight:800,color:Math.abs(tbDr-tbCr)<1?B.success:"#dc2626"}}>{Math.abs(tbDr-tbCr)<1?"✓ Balanced":"⚠️ Diff: "+fmt(Math.abs(tbDr-tbCr))}</span>
+          </div>
+        </div>
+      )}
+
+      {tab==="jvlist"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button style={S.btn()} onClick={()=>setShowJV(true)}>+ New Journal Voucher</button></div>
+          <div style={S.card}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Ref","Date","Narrative","Lines"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {journals.map(jv=>(
+                  <tr key={jv.id}><td style={{...S.td,fontFamily:"monospace",color:"#7986cb",fontWeight:700}}>{jv.ref}</td><td style={S.td}>{jv.journal_date}</td><td style={S.td}>{jv.narrative}</td><td style={S.td}>{(jv.lines||[]).filter(l=>l.account).map(l=>{ const acc=accounts.find(a=>a.code===l.account); return <div key={l.account} style={{fontSize:12}}>{l.dr>0?<span style={{color:"#dc2626"}}>Dr {acc?.name||l.account}: {fmt(l.dr)}</span>:<span style={{color:B.success}}>Cr {acc?.name||l.account}: {fmt(l.cr)}</span>}</div>; })}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {showJV&&(
+            <Modal title="New Journal Voucher" onClose={()=>setShowJV(false)} w={640}>
+              <R2><Fld label="Date"><input type="date" style={S.inp} value={jvDate} onChange={e=>setJvDate(e.target.value)}/></Fld><Fld label="Narrative"><input style={S.inp} value={jvNarr} onChange={e=>setJvNarr(e.target.value)} placeholder="Purpose of entry…"/></Fld></R2>
+              <div style={{marginBottom:14}}>
+                <div style={S.lbl}>Journal Lines</div>
+                {jvLines.map((line,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:8,marginBottom:8}}>
+                    <select style={S.sel} value={line.account} onChange={e=>setJvLines(p=>p.map((l,j)=>j===i?{...l,account:e.target.value}:l))}><option value="">-- Account --</option>{leaf.map(a=><option key={a.code} value={a.code}>{a.code} {a.name}</option>)}</select>
+                    <input type="number" style={S.inp} placeholder="Dr" value={line.dr||""} onChange={e=>setJvLines(p=>p.map((l,j)=>j===i?{...l,dr:+e.target.value,cr:0}:l))}/>
+                    <input type="number" style={S.inp} placeholder="Cr" value={line.cr||""} onChange={e=>setJvLines(p=>p.map((l,j)=>j===i?{...l,cr:+e.target.value,dr:0}:l))}/>
+                    {i>1&&<button onClick={()=>setJvLines(p=>p.filter((_,j)=>j!==i))} style={{...S.ghost,padding:"8px 10px",color:"#dc2626"}}>✕</button>}
+                  </div>
+                ))}
+                <button onClick={()=>setJvLines(p=>[...p,{account:"",dr:0,cr:0}])} style={{...S.ghost,fontSize:12}}>+ Add Line</button>
+              </div>
+              <div style={{display:"flex",gap:20,padding:"12px 14px",background:"#f8f9ff",borderRadius:8,marginBottom:14,fontSize:13}}>
+                <span>Dr: <strong style={{color:"#dc2626"}}>{fmt(jvDr)}</strong></span>
+                <span>Cr: <strong style={{color:B.success}}>{fmt(jvCr)}</strong></span>
+                <span style={{fontWeight:700,color:Math.abs(jvDr-jvCr)<0.01?B.success:"#dc2626"}}>{Math.abs(jvDr-jvCr)<0.01?"✓ Balanced":"⚠️ Diff: "+fmt(Math.abs(jvDr-jvCr))}</span>
+              </div>
+              <button onClick={postJV} disabled={!jvOk} style={{...S.btn(jvOk?B.success:"#9fa8da"),width:"100%",justifyContent:"center",padding:12,cursor:jvOk?"pointer":"not-allowed"}}>Post Journal Voucher</button>
+            </Modal>
+          )}
+        </div>
+      )}
+
+      {tab==="bank"&&(
+        <div>
+          <div style={{...S.card,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:8}}>Bank Statement Import</div>
+            <div style={{fontFamily:"monospace",fontSize:11,background:"#e8eaf6",borderRadius:6,padding:"8px 12px",marginBottom:10,color:"#475569"}}>date, description, credit, debit, balance</div>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <button onClick={dlBank} style={S.ghost}>⬇️ Download Template</button>
+              <input ref={fileRef} type="file" accept=".csv" onChange={importBank} style={{fontSize:12}}/>
+            </div>
+          </div>
+          <div style={S.card}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Date","Description","Credit","Debit","Balance","Status"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {bankTx.map(tx=>(
+                  <tr key={tx.id}><td style={S.td}>{tx.transaction_date}</td><td style={S.td}>{tx.description}</td><td style={{...S.td,color:B.success,fontWeight:tx.credit>0?700:400}}>{tx.credit>0?fmt(tx.credit):"—"}</td><td style={{...S.td,color:"#dc2626",fontWeight:tx.debit>0?700:400}}>{tx.debit>0?fmt(tx.debit):"—"}</td><td style={S.td}>{fmt(tx.balance)}</td><td style={S.td}>{tx.matched?<Pill text="Matched" color="#065f46" bg="#d1fae5"/>:<Pill text="Unmatched" color="#7c5100" bg="#fef3c7"/>}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab==="collections"&&(
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Expected Collections</div>
+          {invoices.filter(i=>i.status!=="Paid").map(inv=>{
+            const bal=(inv.amount||0)-(inv.paid||0);
+            const days=Math.ceil((new Date(inv.due_date)-new Date())/86400000);
+            return <div key={inv.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f3f4f9"}}><div><div style={{fontWeight:700,color:B.dark}}>{inv.client_name}</div><div style={{fontSize:11,color:"#9fa8da"}}>Due: {inv.due_date}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:14,fontWeight:800,color:"#dc2626"}}>{fmt(bal)}</div><Pill text={isNaN(days)?"—":days<0?`${Math.abs(days)}d overdue`:days<7?"Due Soon":"Upcoming"} color={isNaN(days)||days>=7?"#065f46":days<0?"#9b1c1c":"#7c5100"} bg={isNaN(days)||days>=7?"#d1fae5":days<0?"#fee2e2":"#fef3c7"}/></div></div>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WHATSAPP INBOX ───────────────────────────────────────────────────────────
+function WhatsAppInbox({ waLeads, waLeadsDB, leadsDB, tasksDB, users, currentUser }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [sel, setSel] = useState(null);
+  const [form, setForm] = useState({name:"",phone:"",message:"",branch:currentUser.branch});
+  const counselors=users.filter(u=>u.role===ROLES.COUNSELOR&&u.active);
+  const pending=waLeads.filter(w=>!w.converted);
+  const done=waLeads.filter(w=>w.converted);
+
+  const addWa = async () => {
+    if(!form.name||!form.phone) return;
+    await waLeadsDB.insert({...form,converted:false});
+    setForm({name:"",phone:"",message:"",branch:currentUser.branch}); setShowAdd(false);
+  };
+
+  const convert = async (wa) => {
+    const newLead = {name:wa.name,phone:wa.phone,email:"",country:"🇬🇧 UK",source:"WhatsApp",branch:wa.branch||currentUser.branch,list:"GCL",stage:"New Enquiry",score:3,consultation_done:false,agreement_signed:false,payment_received:false,invoice_generated:false,all_doc_received:false,type:"B2C",pending_approval:currentUser.role!==ROLES.CEO,approved:currentUser.role===ROLES.CEO,lost:false,last_contact:tod(),notes:[{id:Date.now(),text:`WhatsApp: "${wa.message}"`,by:currentUser.name,at:new Date().toLocaleString(),type:"WhatsApp"}],docs:{}};
+    const saved = await leadsDB.insert(newLead);
+    if(saved){
+      await waLeadsDB.update(wa.id,{converted:true,lead_id:saved.id});
+      await tasksDB.insert({title:`Follow up: ${wa.name} (WhatsApp)`,client_name:wa.name,lead_id:saved.id,assigned_to:wa.assigned_to||currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
+    }
+    setSel(null);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>WhatsApp Lead Inbox</h2><p style={S.sub}>{pending.length} unprocessed · {done.length} converted</p></div>
+        <button style={S.btn("#25d366")} onClick={()=>setShowAdd(true)}>+ Log WhatsApp Lead</button>
+      </div>
+      {pending.map(wa=>(
+        <div key={wa.id} style={{...S.card,borderLeft:"4px solid #25d366",display:"flex",gap:14,alignItems:"flex-start",marginBottom:10}}>
+          <div style={{width:40,height:40,borderRadius:10,background:"#d1fae5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>💬</div>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <div><div style={{fontSize:14,fontWeight:800,color:B.dark}}>{wa.name}</div><div style={{fontSize:12,color:"#7986cb"}}>{wa.phone}</div></div>
+              <button onClick={()=>setSel(wa)} style={S.ghost}>Process</button>
+            </div>
+            <div style={{background:"#f0fff4",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#1a5c2e",fontStyle:"italic"}}>"{wa.message}"</div>
+          </div>
+        </div>
+      ))}
+      {pending.length===0&&done.length===0&&<div style={{...S.card,textAlign:"center",color:"#9fa8da",padding:40}}>No WhatsApp leads yet.</div>}
+
+      {sel&&(
+        <Modal title={`WhatsApp: ${sel.name}`} onClose={()=>setSel(null)}>
+          <div style={{background:"#f0fff4",borderRadius:10,padding:14,marginBottom:14,fontSize:13,color:"#1a5c2e",fontStyle:"italic"}}>"{sel.message}"<div style={{fontSize:11,color:"#7986cb",marginTop:4,fontStyle:"normal"}}>{sel.phone}</div></div>
+          <Fld label="Assign Counselor"><select style={S.sel} value={sel.assigned_to||""} onChange={e=>{waLeadsDB.update(sel.id,{assigned_to:e.target.value});setSel(p=>({...p,assigned_to:e.target.value}))}}><option value="">-- Select --</option>{counselors.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Fld>
+          <Alert type="info" msg="Converting creates a GCL lead, logs the WhatsApp message as the first note, and creates a 2-day follow-up task."/>
+          <button onClick={()=>convert(sel)} style={{...S.btn("#25d366"),width:"100%",justifyContent:"center",padding:12}}>✓ Convert to Lead</button>
+        </Modal>
+      )}
+      {showAdd&&(
+        <Modal title="Log WhatsApp Lead" onClose={()=>setShowAdd(false)}>
+          <Fld label="Client Name"><input style={S.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="As they wrote on WhatsApp"/></Fld>
+          <R2><Fld label="Phone"><input style={S.inp} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+92 300 …"/></Fld><Fld label="Branch"><select style={S.sel} value={form.branch} onChange={e=>setForm({...form,branch:e.target.value})}>{BRANCHES.map(b=><option key={b}>{b}</option>)}</select></Fld></R2>
+          <Fld label="Their Message"><textarea style={{...S.inp,minHeight:80,resize:"vertical"}} value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Paste or type their enquiry…"/></Fld>
+          <button onClick={addWa} style={{...S.btn("#25d366"),width:"100%",justifyContent:"center",padding:12}}>Log Lead</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+function Notifications({ notifications, notifsDB, leads, currentUser }) {
+  const [selTpl, setSelTpl] = useState(WA_TEMPLATES[0]);
+  const [selClient, setSelClient] = useState("");
+  const [v1, setV1] = useState(""); const [v2, setV2] = useState("");
+  const [sent, setSent] = useState(false);
+  const aclLeads = leads.filter(l=>l.list==="ACL"||l.list==="PCL"||l.list==="BCL");
+  const client = aclLeads.find(l=>l.name===selClient);
+
+  const buildMsg = () => {
+    if(!client) return "";
+    try { return selTpl.msg(client.name,v1||"[Value]",v2||"[Value]"); } catch { return selTpl.msg(client.name,v1||"[Value]"); }
+  };
+
+  const send = async () => {
+    if(!client) return;
+    const msg = buildMsg();
+    window.open(`https://wa.me/${client.phone.replace(/\D/g,"")}?text=${encodeURIComponent(msg)}`,"_blank");
+    await notifsDB.insert({client_name:client.name,phone:client.phone,trigger_event:selTpl.trigger,message:msg,sent_by:currentUser.id,status:"Sent"});
+    setSent(true); setTimeout(()=>setSent(false),3000);
+  };
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Client Notifications</h2><p style={S.sub}>Pre-written WhatsApp templates · Full history</p></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:20}}>
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Select Template</div>
+          {WA_TEMPLATES.map(t=>(
+            <button key={t.id} onClick={()=>setSelTpl(t)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:9,border:"2px solid",borderColor:selTpl.id===t.id?B.primary:"#e8eaf6",background:selTpl.id===t.id?B.light:"#f8f9ff",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:6}}>
+              <span style={{fontSize:18,flexShrink:0}}>{t.emoji}</span>
+              <div style={{fontSize:12,fontWeight:700,color:B.dark}}>{t.trigger}</div>
+            </button>
+          ))}
+        </div>
+        <div>
+          <div style={S.card}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Compose & Send</div>
+            <Fld label="Select Client"><select style={S.sel} value={selClient} onChange={e=>setSelClient(e.target.value)}><option value="">-- Select --</option>{aclLeads.map(l=><option key={l.id}>{l.name}</option>)}</select></Fld>
+            <Fld label="Variable 1 (counselor / date / document)"><input style={S.inp} value={v1} onChange={e=>setV1(e.target.value)} placeholder="e.g. Sana Mirza / April 15 / Passport"/></Fld>
+            <Fld label="Variable 2 (country / amount)"><input style={S.inp} value={v2} onChange={e=>setV2(e.target.value)} placeholder="e.g. UK / PKR 45,000"/></Fld>
+            {client&&<div style={{background:"#f0fff4",borderRadius:10,padding:12,marginBottom:12,fontSize:12,color:"#1a5c2e",whiteSpace:"pre-wrap",lineHeight:1.6,border:"1px solid #a7f3d0"}}>{buildMsg()}</div>}
+            {sent&&<Alert type="success" msg="✓ Sent and logged!"/>}
+            <button onClick={send} disabled={!client} style={{...S.btn("#25d366"),width:"100%",justifyContent:"center",padding:12,opacity:client?1:0.5}}>📱 Open in WhatsApp & Send</button>
+          </div>
+        </div>
+      </div>
+      <div style={S.card}>
+        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Send History ({notifications.length})</div>
+        {notifications.map(n=>(
+          <div key={n.id} style={{display:"flex",gap:12,padding:"10px 0",borderBottom:"1px solid #f3f4f9"}}>
+            <div style={{width:34,height:34,borderRadius:9,background:"#d1fae5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>💬</div>
+            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:B.dark}}>{n.client_name} <span style={{color:"#7986cb",fontWeight:400}}>· {n.phone}</span></div><div style={{fontSize:11,color:"#5c6bc0",marginBottom:4}}>{n.trigger_event} · {n.sent_at}</div><div style={{fontSize:12,color:"#37474f",background:"#f8f9ff",borderRadius:6,padding:"6px 10px",whiteSpace:"pre-wrap",maxHeight:50,overflow:"hidden"}}>{n.message}</div></div>
+          </div>
+        ))}
+        {notifications.length===0&&<div style={{textAlign:"center",color:"#9fa8da",padding:24}}>No messages sent yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── TEAM MODULE ──────────────────────────────────────────────────────────────
+function Team({ users, currentUser, authUser }) {
+  const [showInvite, setShowInvite] = useState(false);
+  const [invEmail, setInvEmail] = useState("");
+  const [invName, setInvName] = useState("");
+  const [invRole, setInvRole] = useState(ROLES.COUNSELOR);
+  const [invBranch, setInvBranch] = useState("Lahore (HQ)");
+  const [invPwd, setInvPwd] = useState("");
+  const [msg, setMsg] = useState("");
+  if(currentUser.role!==ROLES.CEO) return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO only.</div>;
+
+  const createUser = async () => {
+    if(!invEmail||!invPwd||!invName){setMsg("Fill all fields");return;}
+    setMsg("Creating account…");
+    const {data,error} = await supabase.auth.admin.createUser({email:invEmail,password:invPwd,email_confirm:true});
+    if(error){
+      // Admin API not available on client — use sign up instead
+      const {data:d2,error:e2} = await supabase.auth.signUp({email:invEmail,password:invPwd});
+      if(e2){setMsg("Error: "+e2.message);return;}
+      if(d2.user){
+        await supabase.from("users").insert({id:d2.user.id,name:invName,email:invEmail,role:invRole,branch:invBranch,active:true});
+        setMsg("✓ Account created! Ask "+invName+" to check their email to confirm, then they can log in.");
+        setInvEmail(""); setInvName(""); setInvPwd(""); setShowInvite(false);
+      }
+    } else if(data.user){
+      await supabase.from("users").insert({id:data.user.id,name:invName,email:invEmail,role:invRole,branch:invBranch,active:true});
+      setMsg("✓ Created: "+invName);
+      setShowInvite(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Team & Users</h2><p style={S.sub}>{users.length} staff members</p></div>
+        <button style={S.btn()} onClick={()=>setShowInvite(true)}>+ Add Staff Member</button>
+      </div>
+      {msg&&<Alert type="info" msg={msg}/>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:14}}>
+        {users.map(u=>(
+          <div key={u.id} style={S.card}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{width:42,height:42,borderRadius:12,background:(roleC[u.role]||"#94a3b8")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:800,color:roleC[u.role]||"#94a3b8"}}>{(u.name||"?").split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+              <Pill text={u.active?"Active":"Inactive"} color={u.active?"#065f46":"#64748b"} bg={u.active?"#d1fae5":"#f1f5f9"}/>
+            </div>
+            <div style={{fontWeight:800,fontSize:14,color:B.dark,marginBottom:2}}>{u.name}</div>
+            <div style={{fontSize:12,color:"#9fa8da",marginBottom:10}}>{u.email}</div>
+            <div style={{display:"flex",gap:6}}>
+              <Pill text={u.role} color={roleC[u.role]||"#64748b"} bg={(roleC[u.role]||"#64748b")+"18"}/>
+              <Pill text={(u.branch||"").split(" ")[0]} color="#5c6bc0" bg="#eef0fb"/>
+            </div>
+          </div>
+        ))}
+      </div>
+      {showInvite&&(
+        <Modal title="Add Staff Member" onClose={()=>setShowInvite(false)}>
+          <Alert type="info" msg="This creates a real login account. The staff member will receive a confirmation email."/>
+          <Fld label="Full Name"><input style={S.inp} value={invName} onChange={e=>setInvName(e.target.value)} placeholder="Full name"/></Fld>
+          <Fld label="Email Address"><input style={S.inp} type="email" value={invEmail} onChange={e=>setInvEmail(e.target.value)} placeholder="staff@borderandbridges.pk"/></Fld>
+          <Fld label="Temporary Password"><input style={S.inp} type="password" value={invPwd} onChange={e=>setInvPwd(e.target.value)} placeholder="Min 6 characters — they can change it"/></Fld>
+          <R2>
+            <Fld label="Role"><select style={S.sel} value={invRole} onChange={e=>setInvRole(e.target.value)}>{Object.values(ROLES).filter(r=>r!==ROLES.CEO).map(r=><option key={r}>{r}</option>)}</select></Fld>
+            <Fld label="Branch"><select style={S.sel} value={invBranch} onChange={e=>setInvBranch(e.target.value)}>{BRANCHES.map(b=><option key={b}>{b}</option>)}</select></Fld>
+          </R2>
+          <button onClick={createUser} style={{...S.btn(),width:"100%",justifyContent:"center",padding:12}}>Create Account</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── NAV CONFIG ───────────────────────────────────────────────────────────────
+const NAV = [
+  { section:"Overview", items:[{key:"dashboard",label:"Dashboard",icon:"📊"}] },
+  { section:"CRM", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"cases",label:"Active Cases",icon:"📋"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
+  { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
+  { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
+  { section:"Admin", items:[{key:"team",label:"Team & Users",icon:"🔑"}] },
+];
+
+// ─── APP ─────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [authUser, setAuthUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [page, setPage] = useState("dashboard");
+  const [collapsed, setCollapsed] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const leadsDB     = useTable("leads",       { orderBy:"created_at", asc:false });
+  const tasksDB     = useTable("tasks",       { orderBy:"created_at", asc:false });
+  const invoicesDB  = useTable("invoices",    { orderBy:"created_at", asc:false });
+  const accountsDB  = useTable("accounts",    { orderBy:"code", asc:true });
+  const journalsDB  = useTable("journals",    { orderBy:"created_at", asc:false });
+  const bankTxDB    = useTable("bank_transactions", { orderBy:"transaction_date", asc:false });
+  const usersDB     = useTable("users",       { orderBy:"created_at", asc:true });
+  const waLeadsDB   = useTable("wa_leads",    { orderBy:"received_at", asc:false });
+  const notifsDB    = useTable("notifications",{ orderBy:"sent_at", asc:false });
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (authUser && usersDB.data.length > 0) {
+      const profile = usersDB.data.find(u => u.id === authUser.id);
+      if (profile) setCurrentUser(profile);
+    }
+  }, [authUser, usersDB.data]);
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setAuthUser(null); setCurrentUser(null);
+  };
+
+  if (authLoading) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:B.grad,color:"#fff",fontSize:16}}>Loading Border and Bridges CRM…</div>;
+  if (!authUser) return <LoginScreen onLogin={setAuthUser}/>;
+  if (!currentUser) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f0f2fd",fontSize:14,color:"#5c6bc0"}}>Setting up your profile… If this persists, contact the CEO to check your user account.</div>;
+
+  const pendingCount = leadsDB.data.filter(l=>l.pending_approval&&!l.approved).length;
+  const waUnread = waLeadsDB.data.filter(w=>!w.converted).length;
+  const overdueCount = tasksDB.data.filter(t=>!t.done&&t.due_date<tod()).length;
+
+  const props = {
+    leads:leadsDB.data, leadsDB,
+    tasks:tasksDB.data, tasksDB,
+    invoices:invoicesDB.data, invoicesDB,
+    accounts:accountsDB.data, accountsDB,
+    journals:journalsDB.data, journalsDB,
+    bankTx:bankTxDB.data, bankTxDB,
+    users:usersDB.data, usersDB,
+    waLeads:waLeadsDB.data, waLeadsDB,
+    notifications:notifsDB.data, notifsDB,
+    currentUser, authUser, setPage,
+  };
+
+  const renderPage = () => {
+    if (leadsDB.loading) return <Spin/>;
+    switch(page) {
+      case "dashboard":     return <Dashboard {...props}/>;
+      case "leads":         return <Leads {...props}/>;
+      case "cases":         return <Cases {...props}/>;
+      case "tasks":         return <Tasks {...props}/>;
+      case "whatsapp":      return <WhatsAppInbox {...props}/>;
+      case "notifications": return <Notifications {...props}/>;
+      case "invoices":      return <Invoices {...props}/>;
+      case "accounting":    return <Accounting {...props}/>;
+      case "team":          return <Team {...props}/>;
+      default: return null;
+    }
+  };
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:'Outfit',sans-serif;background:#f0f2fd;color:#37474f}
+        ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#c5cae9;border-radius:4px}
+        input:focus,select:focus,textarea:focus{border-color:#2d3a8c!important;box-shadow:0 0 0 3px rgba(45,58,140,0.12)!important;outline:none}
+        button:active{transform:scale(0.97)}
+        .nb:hover{background:rgba(255,255,255,0.08)!important}
+      `}</style>
+      <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+        {/* SIDEBAR */}
+        <div style={{width:collapsed?64:240,background:B.grad,display:"flex",flexDirection:"column",transition:"width 0.2s",flexShrink:0,overflow:"hidden"}}>
+          <div style={{padding:collapsed?"16px 14px":"20px 18px 16px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+            {!collapsed?(
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <svg width="32" height="32" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="46" stroke="#1a91c7" strokeWidth="5" fill="rgba(255,255,255,0.1)"/><path d="M32 50 Q42 33 50 38 Q58 33 68 50" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round"/></svg>
+                <div><div style={{fontSize:13,fontWeight:900,color:"#fff",lineHeight:1.1}}>Border & Bridges</div><div style={{fontSize:9,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:0.8}}>Pvt. Ltd.</div></div>
+              </div>
+            ):(
+              <svg width="32" height="32" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="46" stroke="#1a91c7" strokeWidth="5" fill="rgba(255,255,255,0.1)"/><path d="M32 50 Q42 33 50 38 Q58 33 68 50" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round"/></svg>
+            )}
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"12px 8px"}}>
+            {NAV.map(section=>(
+              <div key={section.section} style={{marginBottom:18}}>
+                {!collapsed&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:1.5,padding:"0 10px 6px"}}>{section.section}</div>}
+                {section.items.map(item=>{
+                  const active=page===item.key;
+                  const badge=item.key==="leads"&&pendingCount>0?pendingCount:item.key==="tasks"&&overdueCount>0?overdueCount:item.key==="whatsapp"&&waUnread>0?waUnread:0;
+                  return (
+                    <button key={item.key} className="nb" onClick={()=>setPage(item.key)} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:collapsed?"10px 14px":"9px 12px",borderRadius:10,border:"none",background:active?"rgba(255,255,255,0.18)":"transparent",color:active?"#fff":"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:13,fontWeight:active?700:500,marginBottom:2,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",transition:"background 0.15s"}}>
+                      <span style={{fontSize:16,flexShrink:0}}>{item.icon}</span>
+                      {!collapsed&&<span style={{flex:1}}>{item.label}</span>}
+                      {!collapsed&&badge>0&&<span style={{background:"#f43f5e",color:"#fff",borderRadius:10,fontSize:10,fontWeight:800,padding:"1px 6px"}}>{badge}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"10px 8px 14px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+            {!collapsed&&(
+              <div style={{padding:"10px 12px",marginBottom:8,background:"rgba(255,255,255,0.08)",borderRadius:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:1}}>{currentUser.name}</div>
+                <div style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>{currentUser.role} · {(currentUser.branch||"").split(" ")[0]}</div>
+              </div>
+            )}
+            {!collapsed&&<button onClick={signOut} style={{width:"100%",padding:"8px",background:"rgba(255,255,255,0.08)",border:"none",borderRadius:8,color:"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:11,fontFamily:"inherit",marginBottom:6}}>Sign Out</button>}
+            <button onClick={()=>setCollapsed(!collapsed)} style={{width:"100%",padding:"7px",background:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>{collapsed?"›":"‹ Collapse"}</button>
+          </div>
+        </div>
+        {/* MAIN */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{background:"#fff",borderBottom:"1px solid #e8eaf6",padding:"11px 26px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>
+            {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending assignment</div>}
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"24px 28px 60px"}}>
+            <div style={{maxWidth:1140,margin:"0 auto"}}>{renderPage()}</div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
