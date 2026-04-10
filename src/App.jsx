@@ -1289,12 +1289,12 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
   const fileRef=useRef();
 
   const dlTemplate=(list)=>{
-    const hdrs="name,phone,email,country,source,branch,type,ielts_score,intake_target,notes";
+    const hdrs="name,phone,email,country,source,branch,type,last_qualification,last_qualification_year,ielts_score,intake_target,issue,status,remarks,notes";
     const samples={
-      GCL:"Ahmed Raza,+923001234567,ahmed@email.com,🇬🇧 UK,WhatsApp,Lahore (HQ),B2C,6.5,Sep 2026,Interested in BSc CS",
-      PCL:"Sara Khan,+923219876543,sara@email.com,🇨🇦 Canada,CEO Personal Reference,Lahore (HQ),B2C,,Jan 2027,MBA program",
-      BCL:"Usman Tariq,+923335556677,usman@email.com,🇦🇺 Australia,Sub-Agent,Lahore (HQ),B2B,7.0,Sep 2026,Via Ali Brokers",
-      ACL:"Fatima Malik,+923114443322,fatima@email.com,🇺🇸 USA,Existing Client Referral,Karachi,B2C,7.5,Sep 2026,F-1 visa in progress",
+      GCL:"Ahmed Raza,+923001234567,ahmed@email.com,🇬🇧 UK,WhatsApp,Lahore (HQ),B2C,Bachelor's Degree,2022,6.5,Sep 2026,IELTS pending,New,,Interested in BSc CS",
+      PCL:"Sara Khan,+923219876543,sara@email.com,🇨🇦 Canada,CEO Personal Reference,Lahore (HQ),B2C,Master's Degree,2021,,Jan 2027,,Active,,MBA program",
+      BCL:"Usman Tariq,+923335556677,usman@email.com,🇦🇺 Australia,Sub-Agent,Lahore (HQ),B2B,Bachelor's Degree,2020,7.0,Sep 2026,,Active,,Via Ali Brokers",
+      ACL:"Fatima Malik,+923114443322,fatima@email.com,🇺🇸 USA,Existing Client Referral,Karachi,B2C,Bachelor's Degree,2021,7.5,Sep 2026,,Active,,F-1 visa in progress",
     };
     const csv=hdrs+"\n"+(samples[list]||samples.GCL);
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`bnb_import_${list.toLowerCase()}.csv`;a.click();
@@ -1343,6 +1343,11 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
         docs:{},
         ielts_score:r.ielts_score||null,
         intake_target:r.intake_target||null,
+        last_qualification:r.last_qualification||null,
+        last_qualification_year:r.last_qualification_year||null,
+        issue:r.issue||null,
+        status:r.status||"New",
+        remarks:r.remarks||null,
         agent_id:null,
       };
       const saved=await leadsDB.insert(newLead);
