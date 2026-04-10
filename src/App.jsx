@@ -2089,7 +2089,7 @@ export default function App() {
                 {!collapsed&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:1.5,padding:"0 10px 6px"}}>{section.section}</div>}
                 {section.items.filter(item=>!item.ceoOnly||(currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER)).map(item=>{
                   const active=page===item.key;
-                  const badge=item.key==="leads"&&pendingCount>0?pendingCount:item.key==="tasks"&&overdueCount>0?overdueCount:item.key==="whatsapp"&&waUnread>0?waUnread:item.key==="processing"&&leads.filter(l=>l.list==="ACL"&&!l.lost).length>0?leads.filter(l=>l.list==="ACL"&&!l.lost).length:0;
+                  const badge=item.key==="leads"&&pendingCount>0?pendingCount:item.key==="tasks"&&overdueCount>0?overdueCount:item.key==="whatsapp"&&waUnread>0?waUnread:item.key==="processing"&&leadsDB.data.filter(l=>l.list==="ACL"&&!l.lost).length>0?leadsDB.data.filter(l=>l.list==="ACL"&&!l.lost).length:0;
                   return(
                     <button key={item.key} className="nb" onClick={()=>setPage(item.key)} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:collapsed?"10px 14px":"9px 12px",borderRadius:10,border:"none",background:active?"rgba(255,255,255,0.18)":"transparent",color:active?"#fff":"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:13,fontWeight:active?700:500,marginBottom:2,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",transition:"background 0.15s"}}>
                       <span style={{fontSize:16,flexShrink:0}}>{item.icon}</span>
