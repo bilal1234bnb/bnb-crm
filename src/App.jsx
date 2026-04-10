@@ -261,7 +261,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const [noteType,setNoteType]=useState("Call");
   const [search,setSearch]=useState("");
   const sources=settings?.lead_sources?JSON.parse(settings.lead_sources):LEAD_SOURCES_DEFAULT;
-  const EF={name:"",phone:"",email:"",country:"🇬🇧 UK",source:sources[0]||"Other",branch:currentUser.branch,type:"B2C",last_qualification:"",last_qualification_year:"",ielts_score:"",intake_target:"",issue:"",status:"New",remarks:"",reminder1:"",reminder2:"",reminder3:""};
+  const EF={name:"",phone:"",email:"",country:"🇬🇧 UK",source:sources[0]||"Other",branch:currentUser.branch,type:"B2C",last_qualification:"",last_qualification_year:"",ielts_score:"",intake_target:"",issue:"",status:"New",remarks:"",reminder1:"",reminder2:"",reminder3:"",enquiry_date:tod()};
   const [form,setForm]=useState(EF);
 
   const filtered=useMemo(()=>{
@@ -291,7 +291,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 
   const addLead=async()=>{
     if(!form.name||!form.phone)return;
-    const nl={...form,list:"GCL",stage:"New Enquiry",score:3,consultation_done:false,agreement_signed:false,payment_received:false,invoice_generated:false,all_doc_received:false,pending_approval:currentUser.role!==ROLES.CEO,approved:currentUser.role===ROLES.CEO,lost:false,last_contact:tod(),notes:[],docs:{},ielts_score:form.ielts_score||null,intake_target:form.intake_target||null,agent_id:form.agent_id||null};
+    const nl={...form,list:"GCL",stage:"New Enquiry",score:3,consultation_done:false,agreement_signed:false,payment_received:false,invoice_generated:false,all_doc_received:false,pending_approval:currentUser.role!==ROLES.CEO,approved:currentUser.role===ROLES.CEO,lost:false,last_contact:tod(),notes:[],docs:{},ielts_score:form.ielts_score||null,intake_target:form.intake_target||null,agent_id:form.agent_id||null,enquiry_date:form.enquiry_date||tod()};
     const saved=await leadsDB.insert(nl);
     if(saved)await tasksDB.insert({title:`Follow up: ${form.name} (2-day auto)`,client_name:form.name,lead_id:saved.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
     setForm(EF);setShowAdd(false);
@@ -357,7 +357,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
               return (
                 <tr key={lead.id} style={rowHighlight(lead)}>
                   <td style={S.td}>{idx+1}</td>
-                  <td style={S.td}>{lead.created_at?.split("T")[0]||lead.date||"—"}</td>
+                  <td style={{...S.td,whiteSpace:"nowrap"}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
                   <td style={S.td}>{lead.phone}</td>
                   <td style={S.td}>{lead.last_qualification||"—"}</td>
@@ -453,6 +453,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
           <R2><Fld label="IELTS/PTE Score"><input style={S.inp} value={form.ielts_score} onChange={e=>setForm({...form,ielts_score:e.target.value})} placeholder="e.g. 6.5"/></Fld><Fld label="Target Intake"><input style={S.inp} value={form.intake_target} onChange={e=>setForm({...form,intake_target:e.target.value})} placeholder="Sep 2026"/></Fld></R2>
           <Fld label="Issue / Concern"><input style={S.inp} value={form.issue} onChange={e=>setForm({...form,issue:e.target.value})} placeholder="Any issue or concern with this lead…"/></Fld>
           <Fld label="Remarks"><input style={S.inp} value={form.remarks} onChange={e=>setForm({...form,remarks:e.target.value})} placeholder="Internal remarks…"/></Fld>
+          <Fld label="Enquiry Date"><input type="date" style={S.inp} value={form.enquiry_date} onChange={e=>setForm({...form,enquiry_date:e.target.value})}/></Fld>
           <Alert type="info" msg="Lead enters GCL and awaits CEO assignment. 2-day follow-up task created automatically."/>
           <button onClick={addLead} style={{...S.btn(),width:"100%",justifyContent:"center",padding:12}}>Submit Lead</button>
         </Modal>
@@ -1301,10 +1302,10 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
   const fileRef=useRef();
 
   const dlTemplate=(list)=>{
-    const hdrs="name,phone,email,country,source,branch,type,last_qualification,last_qualification_year,ielts_score,intake_target,issue,status,remarks,notes";
+    const hdrs="name,phone,email,country,source,branch,type,last_qualification,last_qualification_year,ielts_score,intake_target,issue,status,remarks,enquiry_date,notes";
     const samples={
-      GCL:"Ahmed Raza,+923001234567,ahmed@email.com,🇬🇧 UK,WhatsApp,Lahore (HQ),B2C,Bachelor's Degree,2022,6.5,Sep 2026,IELTS pending,New,,Interested in BSc CS",
-      PCL:"Sara Khan,+923219876543,sara@email.com,🇨🇦 Canada,CEO Personal Reference,Lahore (HQ),B2C,Master's Degree,2021,,Jan 2027,,Active,,MBA program",
+      GCL:"Ahmed Raza,+923001234567,ahmed@email.com,🇬🇧 UK,WhatsApp,Lahore (HQ),B2C,Bachelor's Degree,2022,6.5,Sep 2026,IELTS pending,New,,2026-04-01,Interested in BSc CS",
+      PCL:"Sara Khan,+923219876543,sara@email.com,🇨🇦 Canada,CEO Personal Reference,Lahore (HQ),B2C,Master's Degree,2021,,Jan 2027,,Active,,2026-03-15,MBA program",
       BCL:"Usman Tariq,+923335556677,usman@email.com,🇦🇺 Australia,Sub-Agent,Lahore (HQ),B2B,Bachelor's Degree,2020,7.0,Sep 2026,,Active,,Via Ali Brokers",
       ACL:"Fatima Malik,+923114443322,fatima@email.com,🇺🇸 USA,Existing Client Referral,Karachi,B2C,Bachelor's Degree,2021,7.5,Sep 2026,,Active,,F-1 visa in progress",
     };
@@ -1360,6 +1361,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
         issue:r.issue||null,
         status:r.status||"New",
         remarks:r.remarks||null,
+        enquiry_date:r.enquiry_date||r.date||tod(),
         agent_id:null,
       };
       const saved=await leadsDB.insert(newLead);
