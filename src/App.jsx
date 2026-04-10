@@ -1388,7 +1388,7 @@ const NAV = [
   { section:"CRM", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"cases",label:"Active Cases",icon:"📋"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
   { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
   { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
-  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"settings",label:"Settings",icon:"⚙️"}] },
+  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
 ];
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -1482,7 +1482,7 @@ export default function App() {
             {NAV.map(section=>(
               <div key={section.section} style={{marginBottom:18}}>
                 {!collapsed&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:1.5,padding:"0 10px 6px"}}>{section.section}</div>}
-                {section.items.map(item=>{
+                {section.items.filter(item=>!item.ceoOnly||(currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER)).map(item=>{
                   const active=page===item.key;
                   const badge=item.key==="leads"&&pendingCount>0?pendingCount:item.key==="tasks"&&overdueCount>0?overdueCount:item.key==="whatsapp"&&waUnread>0?waUnread:0;
                   return(
