@@ -349,7 +349,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
       </div>
 
       <div style={{...S.card,overflow:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1100:900}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1200:1000}}>
           <thead><tr>{(tab==="PCL"?PCL_COLS:GCL_COLS).map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {filtered.map((lead,idx)=>{
@@ -410,23 +410,35 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
           {currentUser.role===ROLES.CEO&&<div style={{marginBottom:14}}><div style={S.lbl}>Move to List</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["GCL","PCL","BCL","ACL"].filter(l=>l!==sel.list).map(l=><button key={l} onClick={()=>moveList(sel,l)} style={S.btn(listC[l])}>→ {l}</button>)}</div></div>}
           {currentUser.role===ROLES.CEO&&<div style={{marginBottom:14}}><div style={S.lbl}>Assign Counselor</div><select style={S.sel} value={sel.assigned_to||""} onChange={e=>{assign(sel,e.target.value);setSel(p=>({...p,assigned_to:e.target.value}))}}><option value="">-- Select --</option>{counselors.map(c=><option key={c.id} value={c.id}>{c.name} ({c.branch})</option>)}</select></div>}
           <div style={{borderTop:"1px solid #e8eaf6",paddingTop:16}}>
-            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📝 Notes Timeline</div>
-            <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <select value={noteType} onChange={e=>setNoteType(e.target.value)} style={{...S.sel,width:110,flexShrink:0}}>{CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}</select>
-              <input style={{...S.inp,flex:1}} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={`Add ${noteType} note…`} onKeyDown={e=>e.key==="Enter"&&addNote(sel)}/>
-              <button onClick={()=>addNote(sel)} style={{...S.btn(),flexShrink:0}}>Add</button>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📞 Communication & Activity Log</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,marginBottom:12}}>
+              <select value={noteType} onChange={e=>setNoteType(e.target.value)} style={S.sel}>
+                {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
+              </select>
+              <input style={S.inp} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={`What happened on this ${noteType}? What did client say?`} onKeyDown={e=>e.key==="Enter"&&addNote(sel)}/>
+              <button onClick={()=>addNote(sel)} style={{...S.btn(),flexShrink:0,whiteSpace:"nowrap"}}>+ Log</button>
             </div>
-            <div style={{maxHeight:200,overflowY:"auto"}}>
-              {[...(sel.notes||[])].reverse().map(note=>(
-                <div key={note.id} style={{display:"flex",gap:10,marginBottom:10}}>
-                  <div style={{width:32,height:32,borderRadius:"50%",background:B.light,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:B.primary,flexShrink:0}}>{note.by?.charAt(0)}</div>
-                  <div style={{flex:1,background:"#f8f9ff",borderRadius:10,padding:"10px 12px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span><div style={{display:"flex",gap:6}}><Pill text={note.type} color="#3949ab" bg="#e8eaf6"/><span style={{fontSize:10,color:"#9fa8da"}}>{note.at}</span></div></div>
-                    <div style={{fontSize:13,color:"#37474f"}}>{note.text}</div>
+            <div style={{maxHeight:300,overflowY:"auto"}}>
+              {[...(sel.notes||[])].reverse().map(note=>{
+                const typeColors={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"}};
+                const tc=typeColors[note.type]||typeColors.Other;
+                return (
+                  <div key={note.id} style={{display:"flex",gap:10,marginBottom:10}}>
+                    <div style={{width:34,height:34,borderRadius:10,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{tc.icon}</div>
+                    <div style={{flex:1,background:"#f8f9ff",borderRadius:10,padding:"10px 14px",border:"1px solid #e8eaf6"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <Pill text={note.type} color={tc.c} bg={tc.bg}/>
+                          <span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span>
+                        </div>
+                        <span style={{fontSize:10,color:"#9fa8da"}}>{note.at}</span>
+                      </div>
+                      <div style={{fontSize:13,color:"#37474f",lineHeight:1.5}}>{note.text}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
-              {!(sel.notes||[]).length&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:12}}>No notes yet.</div>}
+                );
+              })}
+              {!(sel.notes||[]).length&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:20,background:"#f8f9ff",borderRadius:10}}>No communication logged yet. Add the first entry above.</div>}
             </div>
           </div>
         </Modal>
@@ -1595,9 +1607,9 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
       {/* Cases table */}
       <div style={{...S.card,overflow:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
-          <thead><tr>{["Client","Country","Current Stage","Docs","Reminders","Officer",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["#","Date Added","Client","Country","Current Stage","Docs","Reminders","Officer",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {cases.map(lead=>{
+            {cases.map((lead,idx)=>{
               const officer=users.find(u=>u.id===lead.assigned_to);
               const docList=PROCESSING_DOCS[lead.country]||[];
               const docDone=docList.filter(d=>lead.docs?.[`doc_${d}`]).length;
@@ -1607,6 +1619,8 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
               const progress=totalStages>0?Math.round((Math.max(stageIdx,0)/totalStages)*100):0;
               return (
                 <tr key={lead.id}>
+                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700}}>{idx+1}</td>
+                  <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
                   <td style={S.td}>{lead.country}</td>
                   <td style={S.td}>
@@ -1699,6 +1713,31 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
               </div>
             </div>
           )}
+
+          {/* Communication Log inside Processing */}
+          <div style={{...S.card,padding:14,marginBottom:0}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>📞 Full Communication Log</div>
+            <div style={{maxHeight:220,overflowY:"auto"}}>
+              {[...(sel.notes||[])].reverse().map(note=>{
+                const typeColors={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"},Processing:{c:"#1a91c7",bg:"#dbeafe",icon:"⚙️"}};
+                const tc=typeColors[note.type]||typeColors.Other;
+                return (
+                  <div key={note.id} style={{display:"flex",gap:10,marginBottom:8,paddingBottom:8,borderBottom:"1px solid #f3f4f9"}}>
+                    <div style={{width:30,height:30,borderRadius:8,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{tc.icon}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                        <div style={{display:"flex",gap:6,alignItems:"center"}}><Pill text={note.type} color={tc.c} bg={tc.bg}/><span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span></div>
+                        <span style={{fontSize:10,color:"#9fa8da"}}>{note.at}</span>
+                      </div>
+                      <div style={{fontSize:12,color:"#37474f"}}>{note.text}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!(sel?.notes||[]).length&&<div style={{color:"#9fa8da",fontSize:12,textAlign:"center",padding:16}}>No communication logged yet for this client.</div>}
+            </div>
+            <div style={{marginTop:10,fontSize:11,color:"#9fa8da",background:"#f8f9ff",padding:"8px 12px",borderRadius:8}}>💡 Communication logs are added from the Leads Pipeline. All counselor and processing notes appear here.</div>
+          </div>
         </Modal>
       )}
     </div>
