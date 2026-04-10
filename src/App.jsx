@@ -1169,13 +1169,226 @@ function Settings({settingsDB,users,usersDB,currentUser}) {
   );
 }
 
+// ─── BULK IMPORT ─────────────────────────────────────────────────────────────
+function BulkImport({leadsDB,tasksDB,currentUser}) {
+  const [step,setStep]=useState(1);
+  const [rows,setRows]=useState([]);
+  const [errors,setErrors]=useState([]);
+  const [targetList,setTargetList]=useState("GCL");
+  const [importing,setImporting]=useState(false);
+  const [done,setDone]=useState(false);
+  const [importCount,setImportCount]=useState(0);
+  const fileRef=useRef();
+
+  const dlTemplate=(list)=>{
+    const hdrs="name,phone,email,country,source,branch,type,ielts_score,intake_target,notes";
+    const samples={
+      GCL:"Ahmed Raza,+923001234567,ahmed@email.com,🇬🇧 UK,WhatsApp,Lahore (HQ),B2C,6.5,Sep 2026,Interested in BSc CS",
+      PCL:"Sara Khan,+923219876543,sara@email.com,🇨🇦 Canada,CEO Personal Reference,Lahore (HQ),B2C,,Jan 2027,MBA program",
+      BCL:"Usman Tariq,+923335556677,usman@email.com,🇦🇺 Australia,Sub-Agent,Lahore (HQ),B2B,7.0,Sep 2026,Via Ali Brokers",
+      ACL:"Fatima Malik,+923114443322,fatima@email.com,🇺🇸 USA,Existing Client Referral,Karachi,B2C,7.5,Sep 2026,F-1 visa in progress",
+    };
+    const csv=hdrs+"\n"+(samples[list]||samples.GCL);
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`bnb_import_${list.toLowerCase()}.csv`;a.click();
+  };
+
+  const parseFile=(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const lines=ev.target.result.split("\n").filter(l=>l.trim());
+      const hdrs=lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/ /g,"_"));
+      const parsed=[];const errs=[];
+      lines.slice(1).forEach((line,i)=>{
+        // Handle quoted fields
+        const cols=line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.replace(/^"|"$/g,"").trim());
+        const obj={};hdrs.forEach((h,j)=>obj[h]=(cols[j]||"").trim());
+        if(!obj.name){errs.push(`Row ${i+2}: Missing name — skipped`);return;}
+        if(!obj.phone){errs.push(`Row ${i+2}: ${obj.name} — missing phone number`);return;}
+        parsed.push(obj);
+      });
+      setRows(parsed);setErrors(errs);setStep(2);
+    };
+    reader.readAsText(file);
+  };
+
+  const confirmImport=async()=>{
+    setImporting(true);
+    let count=0;
+    for(const r of rows){
+      const newLead={
+        name:r.name||"",phone:r.phone||"",email:r.email||"",
+        country:r.country||"🇬🇧 UK",source:r.source||"Other",
+        branch:r.branch||currentUser.branch||"Lahore (HQ)",
+        type:r.type||"B2C",list:targetList,
+        stage:targetList==="ACL"?"Pending Admission":targetList==="PCL"||targetList==="BCL"?"Pending Documents":"New Enquiry",
+        score:3,
+        consultation_done:targetList!=="GCL",
+        agreement_signed:targetList==="ACL",
+        payment_received:targetList==="ACL",
+        invoice_generated:targetList==="ACL",
+        all_doc_received:false,
+        pending_approval:targetList==="GCL"&&currentUser.role!==ROLES.CEO,
+        approved:targetList!=="GCL"||currentUser.role===ROLES.CEO,
+        lost:false,last_contact:tod(),
+        notes:r.notes?[{id:Date.now()+count,text:r.notes,by:"Import",at:tod(),type:"Other"}]:[],
+        docs:{},
+        ielts_score:r.ielts_score||null,
+        intake_target:r.intake_target||null,
+        agent_id:null,
+      };
+      const saved=await leadsDB.insert(newLead);
+      if(saved&&targetList==="GCL"){
+        await tasksDB.insert({title:`Follow up: ${r.name} (imported)`,client_name:r.name,lead_id:saved.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
+      }
+      count++;
+    }
+    setImportCount(count);
+    setImporting(false);setDone(true);setStep(3);
+  };
+
+  const reset=()=>{setStep(1);setRows([]);setErrors([]);setDone(false);setImportCount(0);if(fileRef.current)fileRef.current.value="";};
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Bulk Import Existing Clients</h2><p style={S.sub}>Upload your existing GCL, PCL, BCL or ACL clients from Excel/CSV</p></div>
+
+      {/* Step indicator */}
+      <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:24}}>
+        {[["1","Download Template"],["2","Upload & Review"],["3","Done"]].map(([n,l],i)=>(
+          <div key={n} style={{display:"flex",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",borderRadius:8,background:step===i+1?B.light:step>i+1?"#d1fae5":"#f8f9ff",border:`2px solid ${step===i+1?B.primary:step>i+1?B.success:"#c5cae9"}`}}>
+              <div style={{width:22,height:22,borderRadius:"50%",background:step===i+1?B.primary:step>i+1?B.success:"#c5cae9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:"#fff"}}>{step>i+1?"✓":n}</div>
+              <span style={{fontSize:12,fontWeight:700,color:step===i+1?B.primary:step>i+1?B.success:"#94a3b8"}}>{l}</span>
+            </div>
+            {i<2&&<div style={{width:20,height:2,background:step>i+1?B.success:"#e8eaf6"}}/>}
+          </div>
+        ))}
+      </div>
+
+      {step===1&&(
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:6}}>Step 1 — Download the right template for your clients</div>
+          <div style={{fontSize:13,color:"#5c6bc0",marginBottom:20}}>Each list has a slightly different template. Download the one that matches where your clients currently are.</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:20}}>
+            {[
+              {list:"GCL",color:listC.GCL,bg:listBg.GCL,desc:"New enquiries not yet assigned"},
+              {list:"PCL",color:listC.PCL,bg:listBg.PCL,desc:"Active B2C prospects"},
+              {list:"BCL",color:listC.BCL,bg:"#f5f3ff",desc:"Agent referral leads"},
+              {list:"ACL",color:listC.ACL,bg:listBg.ACL,desc:"Paying active clients"},
+            ].map(({list,color,bg,desc})=>(
+              <div key={list} style={{background:bg,border:`2px solid ${color}30`,borderRadius:12,padding:14,textAlign:"center"}}>
+                <div style={{fontSize:18,fontWeight:900,color,marginBottom:4}}>{list}</div>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:12,lineHeight:1.4}}>{desc}</div>
+                <button onClick={()=>dlTemplate(list)} style={{...S.btn(color),width:"100%",justifyContent:"center",fontSize:11,padding:"7px 8px"}}>⬇️ Download</button>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:6}}>Required columns:</div>
+            <div style={{fontFamily:"monospace",fontSize:11,color:"#475569",background:"#e8eaf6",borderRadius:6,padding:"8px 12px"}}>name, phone, email, country, source, branch, type, ielts_score, intake_target, notes</div>
+          </div>
+          <Alert type="info" msg="Open the downloaded file in Excel. Fill in your client data. Save as CSV (File → Save As → CSV UTF-8). Then click Next."/>
+          <button onClick={()=>setStep(2)} style={{...S.btn(),padding:"10px 24px"}}>Next: Upload File →</button>
+        </div>
+      )}
+
+      {step===2&&(
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:14}}>Step 2 — Upload your file</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+            <Fld label="Upload your CSV file"><input ref={fileRef} type="file" accept=".csv" onChange={parseFile} style={{fontSize:13}}/></Fld>
+            <Fld label="Import into which list?">
+              <select style={S.sel} value={targetList} onChange={e=>setTargetList(e.target.value)}>
+                <option value="GCL">GCL — New Enquiries</option>
+                <option value="PCL">PCL — Potential Clients (B2C)</option>
+                <option value="BCL">BCL — B2B Agent Leads</option>
+                <option value="ACL">ACL — Active Paying Clients</option>
+              </select>
+            </Fld>
+          </div>
+          {errors.length>0&&(
+            <div style={{marginBottom:14,background:"#fce4ec",borderRadius:8,padding:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#dc2626",marginBottom:6}}>⚠️ {errors.length} warning(s) — these rows were skipped:</div>
+              {errors.map((e,i)=><div key={i} style={{fontSize:11,color:"#dc2626",padding:"2px 0"}}>{e}</div>)}
+            </div>
+          )}
+          {rows.length>0&&(
+            <>
+              <Alert type="success" msg={`${rows.length} valid rows found. Review below then confirm.`}/>
+              <div style={{maxHeight:260,overflowY:"auto",marginBottom:14,border:"1px solid #e8eaf6",borderRadius:8}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{position:"sticky",top:0}}>{["#","Name","Phone","Country","Source","IELTS","Intake"].map(h=><th key={h} style={{...S.th,fontSize:10}}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {rows.map((r,i)=>(
+                      <tr key={i} style={{background:i%2===0?"#fff":"#f8f9ff"}}>
+                        <td style={{...S.td,fontSize:11,color:"#9fa8da"}}>{i+1}</td>
+                        <td style={{...S.td,fontWeight:700}}>{r.name}</td>
+                        <td style={S.td}>{r.phone}</td>
+                        <td style={S.td}>{r.country||"🇬🇧 UK"}</td>
+                        <td style={{...S.td,fontSize:11}}>{r.source||"Other"}</td>
+                        <td style={S.td}>{r.ielts_score||"—"}</td>
+                        <td style={S.td}>{r.intake_target||"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {targetList==="ACL"&&<Alert type="warn" msg="ACL import marks agreement, payment & invoice as done. Only import clients who have actually paid."/>}
+              {targetList==="GCL"&&<Alert type="info" msg="GCL leads enter pending approval. CEO must assign counselors. 2-day follow-up tasks created automatically."/>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <button onClick={reset} style={S.ghost}>← Start Over</button>
+                <button onClick={()=>setStep(3)} style={{...S.btn(),padding:"10px 24px"}}>Confirm & Import {rows.length} Leads →</button>
+              </div>
+            </>
+          )}
+          {rows.length===0&&!fileRef.current?.value&&(
+            <div style={{textAlign:"center",color:"#9fa8da",padding:32,fontSize:13}}>Upload a CSV file to preview your data.</div>
+          )}
+        </div>
+      )}
+
+      {step===3&&!done&&(
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:20}}>Importing {rows.length} leads into {targetList}…</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+            <div style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center"}}><div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Records</div><div style={{fontSize:24,fontWeight:900,color:B.primary}}>{rows.length}</div></div>
+            <div style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center"}}><div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Target List</div><div style={{fontSize:20,fontWeight:900,color:listC[targetList]}}>{targetList}</div></div>
+            <div style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center"}}><div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Auto Tasks</div><div style={{fontSize:24,fontWeight:900,color:B.secondary}}>{targetList==="GCL"?rows.length:0}</div></div>
+          </div>
+          <Alert type="warn" msg="This will create real records in your database. This cannot be undone easily."/>
+          <div style={{display:"flex",gap:10,justifyContent:"space-between"}}>
+            <button onClick={()=>setStep(2)} style={S.ghost}>← Back</button>
+            <button onClick={confirmImport} disabled={importing} style={{...S.btn(B.success),padding:"11px 28px",fontSize:14,opacity:importing?0.7:1}}>{importing?`Importing… please wait`:"✓ Confirm Import"}</button>
+          </div>
+        </div>
+      )}
+
+      {done&&(
+        <div style={{...S.card,textAlign:"center",padding:48}}>
+          <div style={{fontSize:48,marginBottom:16}}>🎉</div>
+          <div style={{fontSize:22,fontWeight:900,color:B.success,marginBottom:8}}>{importCount} leads imported successfully!</div>
+          <div style={{fontSize:13,color:"#5c6bc0",marginBottom:24}}>
+            All records are now in <strong style={{color:listC[targetList]}}>{targetList}</strong>.{" "}
+            {targetList==="GCL"?"Go to Leads Pipeline → GCL to assign counselors.":targetList==="ACL"?"Go to Active Cases to manage them.":"Go to Leads Pipeline to continue nurturing."}
+          </div>
+          <div style={{display:"flex",gap:12,justifyContent:"center"}}>
+            <button onClick={reset} style={S.ghost}>Import Another File</button>
+            <button onClick={()=>window.location.reload()} style={S.btn()}>Go to Dashboard</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── NAV ─────────────────────────────────────────────────────────────────────
 const NAV = [
   { section:"Overview", items:[{key:"dashboard",label:"Dashboard",icon:"📊"}] },
   { section:"CRM", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"cases",label:"Active Cases",icon:"📋"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
   { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
   { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
-  { section:"Admin", items:[{key:"settings",label:"Settings",icon:"⚙️"}] },
+  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"settings",label:"Settings",icon:"⚙️"}] },
 ];
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -1237,6 +1450,7 @@ export default function App() {
       case "notifications": return <Notifications {...props}/>;
       case "invoices":      return <Invoices {...props}/>;
       case "accounting":    return <Accounting {...props}/>;
+      case "bulkimport":    return <BulkImport {...props}/>;
       case "settings":      return <Settings {...props}/>;
       default: return null;
     }
