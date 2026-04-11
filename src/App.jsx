@@ -1325,7 +1325,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
         const cols=line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.replace(/^"|"$/g,"").trim());
         const obj={};hdrs.forEach((h,j)=>obj[h]=(cols[j]||"").trim());
         if(!obj.name){errs.push(`Row ${i+2}: Missing name — skipped`);return;}
-        if(!obj.phone){errs.push(`Row ${i+2}: ${obj.name} — missing phone number`);return;}
+        // All other fields optional — import with defaults if missing
         parsed.push(obj);
       });
       setRows(parsed);setErrors(errs);setStep(2);
@@ -1338,10 +1338,13 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
     let count=0;
     for(const r of rows){
       const newLead={
-        name:r.name||"",phone:r.phone||"",email:r.email||"",
-        country:r.country||"🇬🇧 UK",source:r.source||"Other",
-        branch:r.branch||currentUser.branch||"Lahore (HQ)",
-        type:r.type||"B2C",list:targetList,
+        name:(r.name||"").trim(),
+        phone:(r.phone||"").trim()||"—",
+        email:(r.email||"").trim(),
+        country:(r.country||"").trim()||"🇬🇧 UK",
+        source:(r.source||"").trim()||"Other",
+        branch:(r.branch||"").trim()||currentUser.branch||"Lahore (HQ)",
+        type:(r.type||"").trim()||"B2C",list:targetList,
         stage:targetList==="ACL"?"Pending Admission":targetList==="PCL"||targetList==="BCL"?"Pending Documents":"New Enquiry",
         score:3,
         consultation_done:targetList!=="GCL",
@@ -1354,14 +1357,15 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
         lost:false,last_contact:tod(),
         notes:r.notes?[{id:Date.now()+count,text:r.notes,by:"Import",at:tod(),type:"Other"}]:[],
         docs:{},
-        ielts_score:r.ielts_score||null,
-        intake_target:r.intake_target||null,
-        last_qualification:r.last_qualification||null,
-        last_qualification_year:r.last_qualification_year||null,
-        issue:r.issue||null,
-        status:r.status||"New",
-        remarks:r.remarks||null,
-        enquiry_date:r.enquiry_date||r.date||tod(),
+        ielts_score:(r.ielts_score||"").trim()||null,
+        intake_target:(r.intake_target||"").trim()||null,
+        last_qualification:(r.last_qualification||"").trim()||null,
+        last_qualification_year:(r.last_qualification_year||"").trim()||null,
+        issue:(r.issue||"").trim()||null,
+        status:(r.status||"").trim()||"New",
+        remarks:(r.remarks||"").trim()||null,
+        enquiry_date:(r.enquiry_date||r.date||"").trim()||tod(),
+        notes:(r.notes||"").trim()?[{id:Date.now()+count,text:r.notes.trim(),by:"Import",at:tod(),type:"Other"}]:[],
         agent_id:null,
       };
       const saved=await leadsDB.insert(newLead);
@@ -1412,8 +1416,8 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
             ))}
           </div>
           <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:6}}>Required columns:</div>
-            <div style={{fontFamily:"monospace",fontSize:11,color:"#475569",background:"#e8eaf6",borderRadius:6,padding:"8px 12px"}}>name, phone, email, country, source, branch, type, ielts_score, intake_target, notes</div>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:6}}>Only <strong>name</strong> is required — all other columns are optional:</div>
+            <div style={{fontFamily:"monospace",fontSize:11,color:"#475569",background:"#e8eaf6",borderRadius:6,padding:"8px 12px"}}>name*, phone, email, country, source, branch, type, last_qualification, last_qualification_year, ielts_score, intake_target, issue, status, remarks, enquiry_date, notes</div>
           </div>
           <Alert type="info" msg="Open the downloaded file in Excel. Fill in your client data. Save as CSV (File → Save As → CSV UTF-8). Then click Next."/>
           <button onClick={()=>setStep(2)} style={{...S.btn(),padding:"10px 24px"}}>Next: Upload File →</button>
