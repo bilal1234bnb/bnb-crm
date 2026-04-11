@@ -103,8 +103,8 @@ const S = {
   btn:  (c=B.primary) => ({ display:"inline-flex", alignItems:"center", gap:6, background:c, color:"#fff", border:"none", borderRadius:8, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }),
   ghost:{ display:"inline-flex", alignItems:"center", gap:6, background:"#f8f9ff", color:"#3949ab", border:"1px solid #c5cae9", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
   lbl:  { display:"block", fontSize:11, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.8, marginBottom:5 },
-  th:   { textAlign:"left", padding:"10px 14px", fontSize:11, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.5, borderBottom:"2px solid #e8eaf6", background:"#f8f9ff" },
-  td:   { padding:"11px 14px", borderBottom:"1px solid #f3f4f9", fontSize:13, color:"#37474f" },
+  th:   { textAlign:"left", padding:"8px 10px", fontSize:10, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.5, borderBottom:"2px solid #e8eaf6", background:"#f8f9ff", whiteSpace:"nowrap" },
+  td:   { padding:"8px 10px", borderBottom:"1px solid #f3f4f9", fontSize:12, color:"#37474f", verticalAlign:"top" },
   h2:   { margin:"0 0 3px", fontSize:20, fontWeight:800, color:B.dark },
   sub:  { margin:0, fontSize:13, color:"#5c6bc0" },
 };
@@ -260,6 +260,9 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const [noteText,setNoteText]=useState("");
   const [noteType,setNoteType]=useState("Call");
   const [search,setSearch]=useState("");
+  const [selected,setSelected]=useState(new Set());
+  const [batchAssignee,setBatchAssignee]=useState("");
+  const [showBatchBar,setShowBatchBar]=useState(false);
   const sources=settings?.lead_sources?JSON.parse(settings.lead_sources):LEAD_SOURCES_DEFAULT;
   const EF={name:"",phone:"",email:"",country:"🇬🇧 UK",source:sources[0]||"Other",branch:currentUser.branch,type:"B2C",last_qualification:"",last_qualification_year:"",ielts_score:"",intake_target:"",issue:"",status:"New",remarks:"",reminder1:"",reminder2:"",reminder3:"",enquiry_date:tod()};
   const [form,setForm]=useState(EF);
@@ -289,6 +292,63 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
     return due?{background:"#fff3cd",borderLeft:"4px solid #f0b429"}:{};
   };
 
+  // Batch selection helpers
+  const toggleSelect=(id)=>{
+    setSelected(p=>{const n=new Set(p);n.has(id)?n.delete(id):n.add(id);return n;});
+    setShowBatchBar(true);
+  };
+  const selectAll=()=>{
+    if(selected.size===filtered.length){setSelected(new Set());setShowBatchBar(false);}
+    else{setSelected(new Set(filtered.map(l=>l.id)));setShowBatchBar(true);}
+  };
+
+  // Assign selected leads to one counselor
+  const batchAssign=async()=>{
+    if(!batchAssignee||selected.size===0)return;
+    const ids=[...selected];
+    for(let i=0;i<ids.length;i+=50){
+      const chunk=ids.slice(i,i+50);
+      await supabase.from("leads").update({assigned_to:batchAssignee,approved:true,pending_approval:false}).in("id",chunk);
+    }
+    await leadsDB.reload();
+    setSelected(new Set());setShowBatchBar(false);setBatchAssignee("");
+    alert(`✅ ${ids.length} leads assigned to ${counselors.find(c=>c.id===batchAssignee)?.name}`);
+  };
+
+  // Divide equally among all counselors
+  const divideEqually=async()=>{
+    if(counselors.length===0){alert("No counselors available.");return;}
+    const ids=[...selected.size>0?selected:new Set(filtered.map(l=>l.id))];
+    const perCounselor=Math.ceil(ids.length/counselors.length);
+    for(let i=0;i<counselors.length;i++){
+      const chunk=ids.slice(i*perCounselor,(i+1)*perCounselor);
+      if(chunk.length===0)break;
+      await supabase.from("leads").update({assigned_to:counselors[i].id,approved:true,pending_approval:false}).in("id",chunk);
+    }
+    await leadsDB.reload();
+    setSelected(new Set());setShowBatchBar(false);
+    alert(`✅ ${ids.length} leads divided equally among ${counselors.length} counselors (${perCounselor} each)`);
+  };
+
+  // Divide by country — assign each country's leads to a counselor round-robin
+  const divideByCountry=async()=>{
+    if(counselors.length===0){alert("No counselors available.");return;}
+    const ids=[...selected.size>0?selected:new Set(filtered.map(l=>l.id))];
+    const leadsToAssign=filtered.filter(l=>ids.includes(l.id));
+    // Group by country
+    const byCountry={};
+    leadsToAssign.forEach(l=>{if(!byCountry[l.country])byCountry[l.country]=[];byCountry[l.country].push(l.id);});
+    const countries=Object.keys(byCountry);
+    for(let i=0;i<countries.length;i++){
+      const counselor=counselors[i%counselors.length];
+      const chunk=byCountry[countries[i]];
+      await supabase.from("leads").update({assigned_to:counselor.id,approved:true,pending_approval:false}).in("id",chunk);
+    }
+    await leadsDB.reload();
+    setSelected(new Set());setShowBatchBar(false);
+    alert(`✅ Leads divided by country across ${counselors.length} counselors`);
+  };
+
   const addLead=async()=>{
     if(!form.name||!form.phone)return;
     const nl={...form,list:"GCL",stage:"New Enquiry",score:3,consultation_done:false,agreement_signed:false,payment_received:false,invoice_generated:false,all_doc_received:false,pending_approval:currentUser.role!==ROLES.CEO,approved:currentUser.role===ROLES.CEO,lost:false,last_contact:tod(),notes:[],docs:{},ielts_score:form.ielts_score||null,intake_target:form.intake_target||null,agent_id:form.agent_id||null,enquiry_date:form.enquiry_date||tod()};
@@ -315,8 +375,8 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const setScore=async(lead,score)=>{await leadsDB.update(lead.id,{score});setSel(p=>p?{...p,score}:p);};
 
   // GCL/PCL columns
-  const GCL_COLS=["#","Date","Name","Contact","Last Qual.","Year","Country","Issue","Status","Remarks",""];
-  const PCL_COLS=["#","Date","Name","Contact","Last Qual.","Year","Country","Issue","Status","Remarks","R1","R2","R3",""];
+  const GCL_COLS=["","#","Date","Name","Contact","Last Qual.","Year","Country","Issue","Status","Remarks",""];
+  const PCL_COLS=["","#","Date","Name","Contact","Last Qual.","Year","Country","Issue","Status","Remarks","R1","R2","R3",""];
 
   return (
     <div>
@@ -337,10 +397,10 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
         </div>
       )}
 
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-        <div style={{display:"flex",gap:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {["GCL","PCL","BCL","ACL"].map(l=>(
-            <button key={l} onClick={()=>setTab(l)} style={{padding:"8px 18px",borderRadius:8,border:"2px solid",borderColor:tab===l?listC[l]:"#c5cae9",background:tab===l?listBg[l]:"#fff",color:tab===l?listC[l]:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button key={l} onClick={()=>{setTab(l);setSelected(new Set());setShowBatchBar(false);}} style={{padding:"7px 16px",borderRadius:8,border:"2px solid",borderColor:tab===l?listC[l]:"#c5cae9",background:tab===l?listBg[l]:"#fff",color:tab===l?listC[l]:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>
               {l} ({leads.filter(ld=>ld.list===l&&!ld.lost).length})
             </button>
           ))}
@@ -348,15 +408,46 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
         <input style={{...S.inp,width:220,margin:0}} placeholder="🔍 Search name, phone, country…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
 
-      <div style={{...S.card,overflowX:"auto",overflowY:"visible"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1400:1200}}>
-          <thead><tr>{(tab==="PCL"?PCL_COLS:GCL_COLS).map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+      {/* BATCH ASSIGNMENT BAR — CEO only */}
+      {currentUser.role===ROLES.CEO&&(
+        <div style={{...S.card,marginBottom:10,padding:"10px 14px",background:selected.size>0?"#eef0fb":"#f8f9ff",border:`1px solid ${selected.size>0?B.primary:"#e8eaf6"}`}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <button onClick={selectAll} style={{...S.ghost,fontSize:12,padding:"6px 12px"}}>
+              {selected.size===filtered.length&&filtered.length>0?"☑ Deselect All":"☐ Select All"}
+            </button>
+            {selected.size>0&&<span style={{fontSize:13,fontWeight:700,color:B.primary}}>{selected.size} selected</span>}
+            <select style={{...S.sel,width:180}} value={batchAssignee} onChange={e=>setBatchAssignee(e.target.value)}>
+              <option value="">— Assign to counselor —</option>
+              {counselors.map(c=><option key={c.id} value={c.id}>{c.name} ({c.branch})</option>)}
+            </select>
+            <button onClick={batchAssign} disabled={!batchAssignee||selected.size===0} style={{...S.btn(B.success),fontSize:12,padding:"6px 14px",opacity:(!batchAssignee||selected.size===0)?0.4:1}}>✓ Assign Selected</button>
+            <div style={{height:20,width:1,background:"#c5cae9"}}/>
+            <button onClick={divideEqually} style={{...S.btn(B.secondary),fontSize:12,padding:"6px 14px"}}>⚖️ Divide Equally</button>
+            <button onClick={divideByCountry} style={{...S.btn("#7c3aed"),fontSize:12,padding:"6px 14px"}}>🌍 Divide by Country</button>
+            {selected.size>0&&<button onClick={()=>{setSelected(new Set());setShowBatchBar(false);}} style={{...S.ghost,fontSize:12,padding:"6px 12px",color:"#dc2626",borderColor:"#dc2626"}}>✕ Clear</button>}
+          </div>
+        </div>
+      )}
+
+      <div style={{...S.card,padding:0,overflow:"hidden"}}>
+        <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 260px)"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1500:1250}}>
+          <thead><tr>{(tab==="PCL"?PCL_COLS:GCL_COLS).map((h,i)=>(
+            <th key={i} style={{...S.th,width:h===""&&i===0?"36px":undefined}}>
+              {h===""&&i===0?(
+                <input type="checkbox" checked={selected.size===filtered.length&&filtered.length>0} onChange={selectAll} style={{width:15,height:15,accentColor:B.primary,cursor:"pointer"}}/>
+              ):h}
+            </th>
+          ))}</tr></thead>
           <tbody>
             {filtered.map((lead,idx)=>{
               const counselor=users.find(u=>u.id===lead.assigned_to);
               return (
                 <tr key={lead.id} style={rowHighlight(lead)}>
-                  <td style={S.td}>{idx+1}</td>
+                  <td style={{...S.td,width:36}} onClick={e=>e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(lead.id)} onChange={()=>toggleSelect(lead.id)} style={{width:15,height:15,accentColor:B.primary,cursor:"pointer"}}/>
+                  </td>
+                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700}}>{idx+1}</td>
                   <td style={{...S.td,whiteSpace:"nowrap"}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={{...S.td,minWidth:160}}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
                   <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.phone}</td>
@@ -378,6 +469,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
           </tbody>
         </table>
         {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No leads in {tab}{search?` matching "${search}"`:""}.</div>}
+        </div>
       </div>
 
       {sel&&(
