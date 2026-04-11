@@ -103,8 +103,8 @@ const S = {
   btn:  (c=B.primary) => ({ display:"inline-flex", alignItems:"center", gap:6, background:c, color:"#fff", border:"none", borderRadius:8, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }),
   ghost:{ display:"inline-flex", alignItems:"center", gap:6, background:"#f8f9ff", color:"#3949ab", border:"1px solid #c5cae9", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
   lbl:  { display:"block", fontSize:11, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.8, marginBottom:5 },
-  th:   { textAlign:"left", padding:"8px 10px", fontSize:10, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.5, borderBottom:"2px solid #e8eaf6", background:"#f8f9ff", whiteSpace:"nowrap" },
-  td:   { padding:"8px 10px", borderBottom:"1px solid #f3f4f9", fontSize:12, color:"#37474f", verticalAlign:"top" },
+  th:   { textAlign:"left", padding:"6px 8px", fontSize:10, fontWeight:700, color:"#7986cb", textTransform:"uppercase", letterSpacing:0.3, borderBottom:"2px solid #e8eaf6", background:"#f8f9ff", whiteSpace:"nowrap" },
+  td:   { padding:"6px 8px", borderBottom:"1px solid #f3f4f9", fontSize:11, color:"#37474f", verticalAlign:"top" },
   h2:   { margin:"0 0 3px", fontSize:20, fontWeight:800, color:B.dark },
   sub:  { margin:0, fontSize:13, color:"#5c6bc0" },
 };
@@ -431,7 +431,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 
       <div style={{...S.card,padding:0,overflow:"hidden"}}>
         <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 260px)"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1500:1250}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1300:1100}}>
           <thead><tr>{(tab==="PCL"?PCL_COLS:GCL_COLS).map((h,i)=>(
             <th key={i} style={{...S.th,width:h===""&&i===0?"36px":undefined}}>
               {h===""&&i===0?(
@@ -447,22 +447,22 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                   <td style={{...S.td,width:36}} onClick={e=>e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(lead.id)} onChange={()=>toggleSelect(lead.id)} style={{width:15,height:15,accentColor:B.primary,cursor:"pointer"}}/>
                   </td>
-                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700}}>{idx+1}</td>
-                  <td style={{...S.td,whiteSpace:"nowrap"}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
-                  <td style={{...S.td,minWidth:160}}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
-                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.phone}</td>
-                  <td style={S.td}>{lead.last_qualification||"—"}</td>
-                  <td style={S.td}>{lead.last_qualification_year||"—"}</td>
-                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.country}</td>
-                  <td style={{...S.td,minWidth:120,fontSize:12}}>{lead.issue||"—"}</td>
-                  <td style={S.td}><Pill text={lead.status||"New"} color={lead.status==="Active"?"#065f46":lead.status==="Won"?"#1e40af":"#37474f"} bg={lead.status==="Active"?"#d1fae5":lead.status==="Won"?"#dbeafe":"#f3f4f9"}/></td>
-                  <td style={{...S.td,fontSize:12,minWidth:140}}>{lead.remarks||"—"}</td>
+                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700,maxWidth:30,textAlign:"center"}}>{idx+1}</td>
+                  <td style={{...S.td,whiteSpace:"nowrap",maxWidth:90,fontSize:11}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
+                  <td style={{...S.td,minWidth:120,maxWidth:160}}><div style={{fontWeight:700,color:B.dark,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:155}}>{lead.name}</div><div style={{fontSize:10,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
+                  <td style={{...S.td,minWidth:100,maxWidth:130,fontSize:11,whiteSpace:"nowrap"}}>{lead.phone}</td>
+                  <td style={{...S.td,maxWidth:90,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.last_qualification||"—"}</td>
+                  <td style={{...S.td,maxWidth:60,fontSize:11,whiteSpace:"nowrap"}}>{lead.last_qualification_year||"—"}</td>
+                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,whiteSpace:"nowrap"}}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.issue||"—"}</td>
+                  <td style={{...S.td,maxWidth:90}}><Pill text={lead.status||"New"} color={lead.status==="Active"?"#065f46":lead.status==="Won"?"#1e40af":"#37474f"} bg={lead.status==="Active"?"#d1fae5":lead.status==="Won"?"#dbeafe":"#f3f4f9"}/></td>
+                  <td style={{...S.td,fontSize:11,minWidth:80,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.remarks||"—"}</td>
                   {tab==="PCL"&&<>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder1)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder1)?700:400}}>{lead.reminder1||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder2)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder2)?700:400}}>{lead.reminder2||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder3)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder3)?700:400}}>{lead.reminder3||"—"}</td>
                   </>}
-                  <td style={S.td}><button onClick={()=>setSel({...lead})} style={{...S.ghost,fontSize:11,padding:"5px 10px"}}>Open</button></td>
+                  <td style={{...S.td,whiteSpace:"nowrap"}}><button onClick={()=>setSel({...lead})} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>Open</button></td>
                 </tr>
               );
             })}
@@ -1723,10 +1723,10 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
               const progress=totalStages>0?Math.round((Math.max(stageIdx,0)/totalStages)*100):0;
               return (
                 <tr key={lead.id}>
-                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700}}>{idx+1}</td>
+                  <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700,maxWidth:30,textAlign:"center"}}>{idx+1}</td>
                   <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
-                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,whiteSpace:"nowrap"}}>{lead.country}</td>
                   <td style={S.td}>
                     <Pill text={lead.stage||"—"} color="#37474f" bg="#f3f4f9"/>
                     <div style={{marginTop:6,background:"#eef0fb",borderRadius:4,height:5}}>
