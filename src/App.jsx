@@ -1720,16 +1720,23 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
       {step===2&&(
         <div style={S.card}>
           <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:14}}>Step 2 — Upload your file</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-            <Fld label="Upload your CSV file"><input ref={fileRef} type="file" accept=".csv" onChange={parseFile} style={{fontSize:13}}/></Fld>
-            <Fld label="Import into which list?">
-              <select style={S.sel} value={targetList} onChange={e=>setTargetList(e.target.value)}>
-                <option value="GCL">GCL — New Enquiries</option>
-                <option value="PCL">PCL — Potential Clients (B2C)</option>
-                <option value="BCL">BCL — B2B Agent Leads</option>
-                <option value="ACL">ACL — Active Paying Clients</option>
-              </select>
-            </Fld>
+          {/* BIG VISIBLE TARGET LIST SELECTOR */}
+          <div style={{background:listBg[targetList]||"#f8f9ff",border:`2px solid ${listC[targetList]||"#c5cae9"}`,borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#5c6bc0",textTransform:"uppercase",marginBottom:10}}>⚠️ Step 1 — Select which list to import into (IMPORTANT)</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              {["GCL","PCL","BCL","ACL"].map(l=>(
+                <button key={l} onClick={()=>setTargetList(l)} style={{padding:"12px 24px",borderRadius:10,border:`3px solid ${l===targetList?listC[l]:"#e8eaf6"}`,background:l===targetList?listC[l]:"#fff",color:l===targetList?"#fff":listC[l]||"#5c6bc0",fontSize:16,fontWeight:900,cursor:"pointer",minWidth:100}}>
+                  {l}
+                  <div style={{fontSize:10,fontWeight:400,marginTop:2}}>{l==="GCL"?"New Enquiries":l==="PCL"?"Potential":l==="BCL"?"B2B/Agent":"Active Clients"}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{marginTop:12,fontSize:14,fontWeight:800,color:listC[targetList]}}>
+              ✓ Currently selected: <span style={{textDecoration:"underline"}}>{targetList} — {targetList==="GCL"?"New Enquiries":targetList==="PCL"?"Potential Clients":targetList==="BCL"?"B2B Agent Leads":"Active Paying Clients"}</span>
+            </div>
+          </div>
+          <div style={{marginBottom:16}}>
+            <Fld label="Step 2 — Upload your CSV file"><input ref={fileRef} type="file" accept=".csv" onChange={parseFile} style={{fontSize:13}}/></Fld>
           </div>
           {errors.length>0&&(
             <div style={{marginBottom:14,background:"#fce4ec",borderRadius:8,padding:12}}>
@@ -1774,7 +1781,9 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 
       {step===3&&!done&&(
         <div style={S.card}>
-          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:20}}>Importing {rows.length} leads into {targetList}…</div>
+          <div style={{background:listBg[targetList],border:`2px solid ${listC[targetList]}`,borderRadius:10,padding:"12px 20px",marginBottom:20,fontSize:16,fontWeight:900,color:listC[targetList],textAlign:"center"}}>
+            ⚠️ You are about to import {rows.length} records into: <span style={{fontSize:20,textDecoration:"underline"}}>{targetList}</span>
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
             <div style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center"}}><div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Records</div><div style={{fontSize:24,fontWeight:900,color:B.primary}}>{rows.length}</div></div>
             <div style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center"}}><div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Target List</div><div style={{fontSize:20,fontWeight:900,color:listC[targetList]}}>{targetList}</div></div>
