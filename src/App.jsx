@@ -194,8 +194,26 @@ function useTable(tableName, options={}) {
     const {data:rows}=await q;
     setData(rows||[]); setLoading(false);
   };
-  useEffect(()=>{load();},[tableName]);
-  const insert = async row => { const {data:r,error}=await supabase.from(tableName).insert(row).select().single(); if(!error){setData(p=>[r,...p]);return r;} console.error(error);return null; };
+  useEffect(()=>{
+    load();
+    // Real-time subscription — auto-updates when any user changes data
+    const channel=supabase.channel(`realtime_${tableName}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:tableName},(payload)=>{
+        setData(p=>{
+          const exists=p.find(r=>r.id===payload.new.id);
+          return exists?p:[payload.new,...p];
+        });
+      })
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:tableName},(payload)=>{
+        setData(p=>p.map(r=>r.id===payload.new.id?{...r,...payload.new}:r));
+      })
+      .on("postgres_changes",{event:"DELETE",schema:"public",table:tableName},(payload)=>{
+        setData(p=>p.filter(r=>r.id!==payload.old.id));
+      })
+      .subscribe();
+    return ()=>{ supabase.removeChannel(channel); };
+  },[tableName]);
+  const insert = async row => { const {data:r,error}=await supabase.from(tableName).insert(row).select().single(); if(!error){setData(p=>{const exists=p.find(x=>x.id===r.id);return exists?p:[r,...p];});return r;} console.error(error);return null; };
   const update = async (id,changes) => { const {error}=await supabase.from(tableName).update(changes).eq("id",id); if(!error)setData(p=>p.map(r=>r.id===id?{...r,...changes}:r)); };
   const remove = async id => { await supabase.from(tableName).delete().eq("id",id); setData(p=>p.filter(r=>r.id!==id)); };
   return {data,setData,loading,insert,update,remove,reload:load};
@@ -448,15 +466,15 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                     <input type="checkbox" checked={selected.has(lead.id)} onChange={()=>toggleSelect(lead.id)} style={{width:15,height:15,accentColor:B.primary,cursor:"pointer"}}/>
                   </td>
                   <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700,maxWidth:30,textAlign:"center"}}>{idx+1}</td>
-                  <td style={{...S.td,whiteSpace:"nowrap",maxWidth:90,fontSize:11}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
-                  <td style={{...S.td,minWidth:120,maxWidth:160}}><div style={{fontWeight:700,color:B.dark,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:155}}>{lead.name}</div><div style={{fontSize:10,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
-                  <td style={{...S.td,minWidth:100,maxWidth:130,fontSize:11,whiteSpace:"nowrap"}}>{lead.phone}</td>
+                  <td style={{...S.td,maxWidth:85,fontSize:11,wordBreak:"break-word"}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
+                  <td style={{...S.td,minWidth:120,maxWidth:160}}><div style={{fontWeight:700,color:B.dark,fontSize:12,wordBreak:"break-word"}}>{lead.name}</div><div style={{fontSize:10,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
+                  <td style={{...S.td,minWidth:90,maxWidth:120,fontSize:11,wordBreak:"break-all"}}>{lead.phone}</td>
                   <td style={{...S.td,maxWidth:90,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.last_qualification||"—"}</td>
-                  <td style={{...S.td,maxWidth:60,fontSize:11,whiteSpace:"nowrap"}}>{lead.last_qualification_year||"—"}</td>
-                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,whiteSpace:"nowrap"}}>{lead.country}</td>
-                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.issue||"—"}</td>
+                  <td style={{...S.td,maxWidth:70,fontSize:11,wordBreak:"break-word"}}>{lead.last_qualification_year||"—"}</td>
+                  <td style={{...S.td,minWidth:70,maxWidth:100,fontSize:11,wordBreak:"break-word"}}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:70,maxWidth:110,fontSize:11,wordBreak:"break-word"}}>{lead.issue||"—"}</td>
                   <td style={{...S.td,maxWidth:90}}><Pill text={lead.status||"New"} color={lead.status==="Active"?"#065f46":lead.status==="Won"?"#1e40af":"#37474f"} bg={lead.status==="Active"?"#d1fae5":lead.status==="Won"?"#dbeafe":"#f3f4f9"}/></td>
-                  <td style={{...S.td,fontSize:11,minWidth:80,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lead.remarks||"—"}</td>
+                  <td style={{...S.td,fontSize:11,minWidth:70,maxWidth:120,wordBreak:"break-word"}}>{lead.remarks||"—"}</td>
                   {tab==="PCL"&&<>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder1)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder1)?700:400}}>{lead.reminder1||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder2)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder2)?700:400}}>{lead.reminder2||"—"}</td>
@@ -1726,7 +1744,7 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
                   <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700,maxWidth:30,textAlign:"center"}}>{idx+1}</td>
                   <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
-                  <td style={{...S.td,minWidth:80,maxWidth:110,fontSize:11,whiteSpace:"nowrap"}}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:70,maxWidth:100,fontSize:11,wordBreak:"break-word"}}>{lead.country}</td>
                   <td style={S.td}>
                     <Pill text={lead.stage||"—"} color="#37474f" bg="#f3f4f9"/>
                     <div style={{marginTop:6,background:"#eef0fb",borderRadius:4,height:5}}>
