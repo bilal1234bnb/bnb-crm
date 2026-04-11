@@ -626,12 +626,65 @@ function Cases({leads,leadsDB,tasksDB,currentUser}) {
 }
 
 // ─── TASKS ────────────────────────────────────────────────────────────────────
-function Tasks({tasks,tasksDB,users,currentUser}) {
+function Tasks({tasks,tasksDB,leads,users,currentUser}) {
   const [showAdd,setShowAdd]=useState(false);
+  const [completeModal,setCompleteModal]=useState(null); // task being completed
+  const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:""});
   const [form,setForm]=useState({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
   const mine=tasks.filter(t=>currentUser.role===ROLES.CEO||t.assigned_to===currentUser.id);
   const open=mine.filter(t=>!t.done).sort((a,b)=>{if(a.due_date<tod()&&b.due_date>=tod())return -1;if(b.due_date<tod()&&a.due_date>=tod())return 1;return(a.due_date||"").localeCompare(b.due_date||"");});
   const done=mine.filter(t=>t.done);
+
+  // Get last note for a client from leads
+  const getLastNote=(clientName)=>{
+    const lead=leads.find(l=>l.name===clientName);
+    if(!lead||(lead.notes||[]).length===0)return null;
+    const last=[...(lead.notes||[])].sort((a,b)=>b.id-a.id)[0];
+    return last;
+  };
+
+  // Open complete modal instead of direct done
+  const openComplete=(task)=>{
+    setCompleteModal(task);
+    setOutcome({issue:"",remarks:"",last_note:"",next_reminder:""});
+  };
+
+  // Save outcome and mark done, optionally create new reminder task
+  const saveOutcome=async()=>{
+    if(!completeModal)return;
+    // Mark task done with outcome saved
+    await tasksDB.update(completeModal.id,{
+      done:true,
+      outcome_issue:outcome.issue||null,
+      outcome_remarks:outcome.remarks||null,
+      outcome_note:outcome.last_note||null,
+      completed_at:new Date().toISOString(),
+    });
+    // If next reminder set — create a new follow-up task
+    if(outcome.next_reminder){
+      await tasksDB.insert({
+        title:`Follow up: ${completeModal.client_name||completeModal.title}`,
+        client_name:completeModal.client_name,
+        lead_id:completeModal.lead_id,
+        assigned_to:completeModal.assigned_to||currentUser.id,
+        due_date:outcome.next_reminder,
+        priority:completeModal.priority||"High",
+        type:"Follow-up",
+        auto_generated:false,
+      });
+    }
+    // Also save note to lead if last_note filled
+    if(outcome.last_note&&completeModal.lead_id){
+      const lead=leads.find(l=>l.id===completeModal.lead_id);
+      if(lead){
+        const note={id:Date.now(),text:outcome.last_note,by:currentUser.name,at:new Date().toLocaleString(),type:"Call"};
+        const updated=[...(lead.notes||[]),note];
+        await supabase.from("leads").update({notes:updated,last_contact:tod()}).eq("id",lead.id);
+      }
+    }
+    setCompleteModal(null);
+  };
+
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
@@ -639,16 +692,94 @@ function Tasks({tasks,tasksDB,users,currentUser}) {
         <button style={S.btn("#7c3aed")} onClick={()=>setShowAdd(true)}>+ Add Task</button>
       </div>
       <div style={{display:"grid",gap:9,marginBottom:20}}>
-        {open.map(t=>{const od=t.due_date&&t.due_date<tod();return(
-          <div key={t.id} style={{...S.card,display:"flex",alignItems:"center",gap:14,padding:"12px 16px",borderLeft:`4px solid ${od?B.danger:priC[t.priority]||"#94a3b8"}`}}>
-            <button onClick={()=>tasksDB.update(t.id,{done:true})} style={{width:22,height:22,borderRadius:6,border:`2px solid ${od?B.danger:"#c5cae9"}`,background:"#fff",cursor:"pointer",flexShrink:0}}/>
-            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:B.dark}}>{t.title}{t.auto_generated&&<span style={{fontSize:10,color:"#9fa8da",marginLeft:6}}>🤖</span>}</div><div style={{fontSize:11,color:"#9fa8da",marginTop:2}}>{t.client_name&&`${t.client_name} · `}<span style={{color:od?"#dc2626":"#9fa8da",fontWeight:od?700:400}}>{od?`⚠️ Overdue since ${t.due_date}`:`Due: ${t.due_date||"—"}`}</span></div></div>
-            <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
-          </div>
-        );})}
+        {open.map(t=>{
+          const od=t.due_date&&t.due_date<tod();
+          const lastNote=t.client_name?getLastNote(t.client_name):null;
+          return(
+            <div key={t.id} style={{...S.card,padding:"12px 16px",borderLeft:`4px solid ${od?B.danger:priC[t.priority]||"#94a3b8"}`}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                {/* Checkbox */}
+                <button onClick={()=>openComplete(t)} style={{width:22,height:22,borderRadius:6,border:`2px solid ${od?B.danger:"#c5cae9"}`,background:"#fff",cursor:"pointer",flexShrink:0,marginTop:2}}/>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{t.title}{t.auto_generated&&<span style={{fontSize:10,color:"#9fa8da",marginLeft:6}}>🤖</span>}</div>
+                      <div style={{fontSize:11,color:"#9fa8da",marginTop:2}}>
+                        {t.client_name&&<span style={{fontWeight:600,color:"#5c6bc0"}}>{t.client_name} · </span>}
+                        <span style={{color:od?"#dc2626":"#9fa8da",fontWeight:od?700:400}}>{od?`⚠️ Overdue since ${t.due_date}`:`Due: ${t.due_date||"—"}`}</span>
+                      </div>
+                    </div>
+                    <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
+                  </div>
+                  {/* Last call note */}
+                  {lastNote&&(
+                    <div style={{marginTop:8,background:"#f0f4ff",borderRadius:8,padding:"7px 10px",borderLeft:`3px solid ${B.secondary}`}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3}}>
+                        <span style={{fontSize:10,fontWeight:700,color:B.secondary}}>LAST {lastNote.type?.toUpperCase()||"NOTE"}</span>
+                        <span style={{fontSize:10,color:"#9fa8da"}}>{lastNote.at}</span>
+                        <span style={{fontSize:10,color:"#9fa8da"}}>by {lastNote.by}</span>
+                      </div>
+                      <div style={{fontSize:12,color:"#37474f",lineHeight:1.4}}>{lastNote.text?.slice(0,120)}{lastNote.text?.length>120?"…":""}</div>
+                    </div>
+                  )}
+                  {/* Previous outcome if any */}
+                  {t.outcome_remarks&&(
+                    <div style={{marginTop:6,background:"#fffde7",borderRadius:6,padding:"5px 10px",fontSize:11,color:"#7c5100"}}>
+                      📝 Last outcome: {t.outcome_remarks}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
         {open.length===0&&<div style={{...S.card,textAlign:"center",color:"#9fa8da",padding:32}}>All caught up! 🎉</div>}
       </div>
-      {done.length>0&&<div><div style={{fontSize:12,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:10}}>Completed ({done.length})</div>{done.slice(0,5).map(t=><div key={t.id} style={{...S.card,display:"flex",alignItems:"center",gap:12,padding:"10px 16px",opacity:0.5,marginBottom:8}}><span style={{color:B.success}}>✓</span><span style={{fontSize:13,textDecoration:"line-through",color:"#9fa8da"}}>{t.title}</span></div>)}</div>}
+      {done.length>0&&(
+        <div>
+          <div style={{fontSize:12,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:10}}>Completed ({done.length})</div>
+          {done.slice(0,10).map(t=>(
+            <div key={t.id} style={{...S.card,display:"flex",alignItems:"flex-start",gap:12,padding:"10px 16px",opacity:0.6,marginBottom:8}}>
+              <span style={{color:B.success,marginTop:2}}>✓</span>
+              <div>
+                <div style={{fontSize:13,textDecoration:"line-through",color:"#9fa8da"}}>{t.title}</div>
+                {t.outcome_remarks&&<div style={{fontSize:11,color:"#7c5100",marginTop:2}}>📝 {t.outcome_remarks}</div>}
+                {t.outcome_note&&<div style={{fontSize:11,color:"#5c6bc0",marginTop:2}}>💬 {t.outcome_note}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* COMPLETE TASK MODAL */}
+      {completeModal&&(
+        <Modal title={`✅ Complete: ${completeModal.title}`} onClose={()=>setCompleteModal(null)} w={520}>
+          <div style={{background:B.light,borderRadius:10,padding:"10px 14px",marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.primary,marginBottom:2}}>Client: {completeModal.client_name||"—"}</div>
+            <div style={{fontSize:11,color:"#5c6bc0"}}>Due: {completeModal.due_date||"—"} · Type: {completeModal.type}</div>
+          </div>
+          <Fld label="What did the client say? (Call Note)">
+            <textarea style={{...S.inp,minHeight:70,resize:"vertical"}} value={outcome.last_note} onChange={e=>setOutcome({...outcome,last_note:e.target.value})} placeholder="e.g. Client said he will arrange bank statement by Friday. Interested in UK Masters…"/>
+          </Fld>
+          <R2>
+            <Fld label="Issue (if any)">
+              <input style={S.inp} value={outcome.issue} onChange={e=>setOutcome({...outcome,issue:e.target.value})} placeholder="e.g. IELTS score low"/>
+            </Fld>
+            <Fld label="Remarks">
+              <input style={S.inp} value={outcome.remarks} onChange={e=>setOutcome({...outcome,remarks:e.target.value})} placeholder="e.g. Hot lead, follow up urgently"/>
+            </Fld>
+          </R2>
+          <Fld label="📅 Set Next Reminder (creates new follow-up task)">
+            <input type="date" style={S.inp} value={outcome.next_reminder} onChange={e=>setOutcome({...outcome,next_reminder:e.target.value})} min={tod()}/>
+          </Fld>
+          {outcome.next_reminder&&<Alert type="info" msg={`A new follow-up task will be created for ${outcome.next_reminder}`}/>}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={saveOutcome} style={{...S.btn(B.success),flex:1,justifyContent:"center",padding:12}}>✓ Mark Done{outcome.next_reminder?" & Set Reminder":""}</button>
+            <button onClick={()=>setCompleteModal(null)} style={{...S.ghost,padding:12}}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
       {showAdd&&(
         <Modal title="Add Task" onClose={()=>setShowAdd(false)}>
           <Fld label="Task"><input style={S.inp} value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Task description…"/></Fld>
@@ -2213,7 +2344,7 @@ export default function App() {
       case "dashboard":     return <Dashboard {...props}/>;
       case "leads":         return <Leads {...props}/>;
       case "cases":         return <Cases {...props}/>;
-      case "tasks":         return <Tasks {...props}/>;
+      case "tasks":         return <Tasks {...props} leads={leadsDB.data}/>;
       case "processing":    return <Processing {...props}/>;
       case "reporting":     return <Reporting {...props}/>;
       case "activitylog":   return <ActivityLog {...props}/>;
