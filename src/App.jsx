@@ -573,12 +573,54 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 }
 
 // ─── CASES ───────────────────────────────────────────────────────────────────
-function Cases({leads,leadsDB,tasksDB,currentUser}) {
+function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
   const [sel,setSel]=useState(null);
   const acl=leads.filter(l=>l.list==="ACL"&&!l.lost);
-  const changeStage=async(lead,ns)=>{
-    if(ns==="Applied for Admission"&&!lead.all_doc_received){alert("⛔ All documents must be received first.");return;}
-    if(ns==="Case Closed"&&lead.stage!=="Visa WON"&&!lead.stage?.includes("Refund")){alert("⛔ Only close after Visa WON or Refund.");return;}
+  const changeStage=async(lead,ns,invoices)=>{
+    // Gate 1: Docs required before Application
+    if(ns==="Applied for Admission"&&!lead.all_doc_received){
+      alert("⛔ All documents must be received first.");return;
+    }
+    // Gate 2: Invoice must exist before moving past Assessment
+    const INVOICE_REQUIRED_STAGES=["University Application Submitted","Institution Application Submitted","College Application Submitted","Uni-Assist / Direct Application Submitted","Pre-Enrollment (Universitaly) Submitted","Skills Assessment Applied","Express Entry Profile Created","Job Seeker Visa Filed","Chancenkarte Application Filed","Work Permit Filed","Visa Filed","PR Application Submitted"];
+    if(INVOICE_REQUIRED_STAGES.includes(ns)){
+      const clientInvoices=(invoices||[]).filter(i=>i.client_name===lead.name);
+      if(clientInvoices.length===0){
+        alert(`⛔ Invoice Required
+
+An invoice must be created for ${lead.name} before moving to "${ns}".
+
+Go to Invoices → Create Invoice for this client first.`);
+        return;
+      }
+    }
+    // Gate 3: Payment must be received before Visa Filing
+    const PAYMENT_REQUIRED_STAGES=["Visa Filed","Visa Application Prepared","PR Application Submitted","Study Permit Application Prepared","Residence Permit Application Prepared","Student Visa Application Prepared","Job Seeker Visa Filed","Chancenkarte Application Filed"];
+    if(PAYMENT_REQUIRED_STAGES.includes(ns)){
+      const clientInvoices=(invoices||[]).filter(i=>i.client_name===lead.name);
+      const totalPaid=clientInvoices.reduce((a,i)=>a+(i.paid||0),0);
+      const totalBilled=clientInvoices.reduce((a,i)=>a+(i.amount||0),0);
+      if(totalBilled===0){
+        alert(`⛔ No Invoice Found
+
+Create and mark an invoice as paid for ${lead.name} before filing the visa.`);
+        return;
+      }
+      if(totalPaid<totalBilled*0.5){
+        const confirm=window.confirm(`⚠️ Payment Warning
+
+${lead.name} has paid ${Math.round((totalPaid/totalBilled)*100)}% of the invoice (PKR ${totalPaid.toLocaleString()} of PKR ${totalBilled.toLocaleString()}).
+
+At least 50% payment is required before visa filing.
+
+Do you want to proceed anyway? (CEO override)`);
+        if(!confirm)return;
+      }
+    }
+    // Gate 4: Case Closed only after WON/Rejected/Refund
+    if(ns==="Case Closed"&&lead.stage!=="Visa Approved"&&lead.stage!=="PR Approved"&&lead.stage!=="Visa Rejected"&&lead.stage!=="PR Rejected"&&!lead.stage?.includes("Refund")){
+      alert("⛔ Only close after Visa Approved, Rejected, or Refund.");return;
+    }
     await leadsDB.update(lead.id,{stage:ns});
     await tasksDB.insert({title:`${lead.name}: moved to "${ns}"`,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to,due_date:tod(),priority:"Medium",type:"Follow-up",auto_generated:true});
     setSel(null);
@@ -593,7 +635,11 @@ function Cases({leads,leadsDB,tasksDB,currentUser}) {
           <tbody>
             {acl.map(lead=>(
               <tr key={lead.id}>
-                <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
+                <td style={S.td}>
+                  <div style={{fontWeight:700,color:B.dark}}>{lead.name}</div>
+                  <div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div>
+                  {(()=>{const inv=(invoices||[]).filter(i=>i.client_name===lead.name);const paid=inv.reduce((a,i)=>a+(i.paid||0),0);const billed=inv.reduce((a,i)=>a+(i.amount||0),0);if(inv.length===0)return <span style={{fontSize:10,background:"#fee2e2",color:"#dc2626",borderRadius:4,padding:"1px 6px",fontWeight:700}}>⚠️ No Invoice</span>;if(paid>=billed)return <span style={{fontSize:10,background:"#d1fae5",color:"#065f46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>✓ Paid</span>;return <span style={{fontSize:10,background:"#fef3c7",color:"#7c5100",borderRadius:4,padding:"1px 6px",fontWeight:700}}>⏳ {Math.round((paid/Math.max(billed,1))*100)}% Paid</span>;})()}
+                </td>
                 <td style={S.td}>{lead.country}<div style={{fontSize:11,color:"#9fa8da"}}>{lead.intake_target}</div></td>
                 <td style={S.td}><Pill text={lead.stage} color="#37474f" bg="#f3f4f9"/></td>
                 <td style={S.td}>{lead.all_doc_received?<span style={{color:B.success,fontWeight:700,fontSize:12}}>Complete ✓</span>:<span style={{color:B.warn,fontSize:12}}>Pending</span>}</td>
@@ -617,7 +663,7 @@ function Cases({leads,leadsDB,tasksDB,currentUser}) {
           </div>
           <div style={S.lbl}>Move to Stage</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",maxHeight:200,overflowY:"auto"}}>
-            {(COUNTRY_STAGES[sel.country]||[]).map(stage=><button key={stage} onClick={()=>changeStage(sel,stage)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>)}
+            {(COUNTRY_STAGES[sel.country]||[]).map(stage=><button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>)}
           </div>
         </Modal>
       )}
@@ -1761,7 +1807,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 }
 
 // ─── PROCESSING MODULE ───────────────────────────────────────────────────────
-function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
+function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUser}) {
   const [search,setSearch]=useState("");
   const [sel,setSel]=useState(null);
   const [filterCountry,setFilterCountry]=useState("All");
@@ -1790,8 +1836,31 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
   });
 
   const changeStage=async(lead,ns)=>{
+    // Invoice gate — warn but allow processing to proceed (CEO can override)
+    const VISA_STAGES=["Visa Filed","PR Application Submitted","Study Permit Application Prepared","Residence Permit Application Prepared","Student Visa Application Prepared","Job Seeker Visa Filed","Chancenkarte Application Filed"];
+    if(VISA_STAGES.includes(ns)){
+      const clientInvoices=(invoicesProp||[]).filter(i=>i.client_name===lead.name);
+      const totalPaid=clientInvoices.reduce((a,i)=>a+(i.paid||0),0);
+      const totalBilled=clientInvoices.reduce((a,i)=>a+(i.amount||0),0);
+      if(totalBilled===0){
+        const proceed=window.confirm(`⚠️ No Invoice Found
+
+${lead.name} has no invoice on record.
+
+It is recommended to create an invoice before filing.
+
+Proceed anyway?`);
+        if(!proceed)return;
+      } else if(totalPaid<totalBilled*0.5){
+        const proceed=window.confirm(`⚠️ Payment Incomplete
+
+${lead.name} has only paid ${Math.round((totalPaid/totalBilled)*100)}% of the invoice.
+
+Proceed to "${ns}" anyway?`);
+        if(!proceed)return;
+      }
+    }
     await leadsDB.update(lead.id,{stage:ns});
-    // Auto-create task on stage change
     const taskTitle=`${lead.name}: Stage → "${ns}"`;
     await tasksDB.insert({title:taskTitle,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to||currentUser.id,due_date:tod(),priority:"High",type:"Processing",auto_generated:true});
     setSel(p=>p?{...p,stage:ns}:p);
@@ -1918,7 +1987,7 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
               <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Move to Stage</div>
               <div style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
                 {(PROCESSING_STAGES[sel.country]||[]).map(stage=>(
-                  <button key={stage} onClick={()=>changeStage(sel,stage)} style={{textAlign:"left",padding:"7px 10px",borderRadius:7,border:"1px solid",borderColor:sel.stage===stage?B.primary:"#e8eaf6",background:sel.stage===stage?B.light:"#f8f9ff",color:sel.stage===stage?B.primary:"#37474f",fontSize:11,fontWeight:sel.stage===stage?700:400,cursor:"pointer"}}>{stage}</button>
+                  <button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{textAlign:"left",padding:"7px 10px",borderRadius:7,border:"1px solid",borderColor:sel.stage===stage?B.primary:"#e8eaf6",background:sel.stage===stage?B.light:"#f8f9ff",color:sel.stage===stage?B.primary:"#37474f",fontSize:11,fontWeight:sel.stage===stage?700:400,cursor:"pointer"}}>{stage}</button>
                 ))}
               </div>
             </div>
@@ -2343,7 +2412,7 @@ export default function App() {
     switch(page){
       case "dashboard":     return <Dashboard {...props}/>;
       case "leads":         return <Leads {...props}/>;
-      case "cases":         return <Cases {...props}/>;
+      case "cases":         return <Cases {...props} invoices={invoicesDB.data}/>;
       case "tasks":         return <Tasks {...props} leads={leadsDB.data}/>;
       case "processing":    return <Processing {...props}/>;
       case "reporting":     return <Reporting {...props}/>;
