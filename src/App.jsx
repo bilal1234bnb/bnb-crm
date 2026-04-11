@@ -348,8 +348,8 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
         <input style={{...S.inp,width:220,margin:0}} placeholder="🔍 Search name, phone, country…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
 
-      <div style={{...S.card,overflow:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1200:1000}}>
+      <div style={{...S.card,overflowX:"auto",overflowY:"visible"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:tab==="PCL"?1400:1200}}>
           <thead><tr>{(tab==="PCL"?PCL_COLS:GCL_COLS).map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {filtered.map((lead,idx)=>{
@@ -358,14 +358,14 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                 <tr key={lead.id} style={rowHighlight(lead)}>
                   <td style={S.td}>{idx+1}</td>
                   <td style={{...S.td,whiteSpace:"nowrap"}}>{lead.enquiry_date||lead.created_at?.split("T")[0]||"—"}</td>
-                  <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
-                  <td style={S.td}>{lead.phone}</td>
+                  <td style={{...S.td,minWidth:160}}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{counselor?.name||"Unassigned"}</div></td>
+                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.phone}</td>
                   <td style={S.td}>{lead.last_qualification||"—"}</td>
                   <td style={S.td}>{lead.last_qualification_year||"—"}</td>
-                  <td style={S.td}>{lead.country}</td>
-                  <td style={{...S.td,maxWidth:120,fontSize:12}}>{lead.issue||"—"}</td>
+                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:120,fontSize:12}}>{lead.issue||"—"}</td>
                   <td style={S.td}><Pill text={lead.status||"New"} color={lead.status==="Active"?"#065f46":lead.status==="Won"?"#1e40af":"#37474f"} bg={lead.status==="Active"?"#d1fae5":lead.status==="Won"?"#dbeafe":"#f3f4f9"}/></td>
-                  <td style={{...S.td,fontSize:12,maxWidth:140}}>{lead.remarks||"—"}</td>
+                  <td style={{...S.td,fontSize:12,minWidth:140}}>{lead.remarks||"—"}</td>
                   {tab==="PCL"&&<>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder1)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder1)?700:400}}>{lead.reminder1||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder2)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder2)?700:400}}>{lead.reminder2||"—"}</td>
@@ -1335,46 +1335,52 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 
   const confirmImport=async()=>{
     setImporting(true);
-    let count=0;
-    for(const r of rows){
-      const newLead={
-        name:(r.name||"").trim(),
-        phone:(r.phone||"").trim()||"—",
-        email:(r.email||"").trim(),
-        country:(r.country||"").trim()||"🇬🇧 UK",
-        source:(r.source||"").trim()||"Other",
-        branch:(r.branch||"").trim()||currentUser.branch||"Lahore (HQ)",
-        type:(r.type||"").trim()||"B2C",list:targetList,
-        stage:targetList==="ACL"?"Pending Admission":targetList==="PCL"||targetList==="BCL"?"Pending Documents":"New Enquiry",
-        score:3,
-        consultation_done:targetList!=="GCL",
-        agreement_signed:targetList==="ACL",
-        payment_received:targetList==="ACL",
-        invoice_generated:targetList==="ACL",
-        all_doc_received:false,
-        pending_approval:targetList==="GCL"&&currentUser.role!==ROLES.CEO,
-        approved:targetList!=="GCL"||currentUser.role===ROLES.CEO,
-        lost:false,last_contact:tod(),
-        notes:r.notes?[{id:Date.now()+count,text:r.notes,by:"Import",at:tod(),type:"Other"}]:[],
-        docs:{},
-        ielts_score:(r.ielts_score||"").trim()||null,
-        intake_target:(r.intake_target||"").trim()||null,
-        last_qualification:(r.last_qualification||"").trim()||null,
-        last_qualification_year:(r.last_qualification_year||"").trim()||null,
-        issue:(r.issue||"").trim()||null,
-        status:(r.status||"").trim()||"New",
-        remarks:(r.remarks||"").trim()||null,
-        enquiry_date:(r.enquiry_date||r.date||"").trim()||tod(),
-        notes:(r.notes||"").trim()?[{id:Date.now()+count,text:r.notes.trim(),by:"Import",at:tod(),type:"Other"}]:[],
-        agent_id:null,
-      };
-      const saved=await leadsDB.insert(newLead);
-      if(saved&&targetList==="GCL"){
-        await tasksDB.insert({title:`Follow up: ${r.name} (imported)`,client_name:r.name,lead_id:saved.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
+    const allLeads=rows.map((r,i)=>({
+      name:(r.name||"").trim(),
+      phone:(r.phone||"").trim()||"—",
+      email:(r.email||"").trim(),
+      country:(r.country||"").trim()||"🇬🇧 UK",
+      source:(r.source||"").trim()||"Other",
+      branch:(r.branch||"").trim()||currentUser.branch||"Lahore (HQ)",
+      type:(r.type||"").trim()||"B2C",
+      list:targetList,
+      stage:targetList==="ACL"?"Pending Admission":targetList==="PCL"||targetList==="BCL"?"Pending Documents":"New Enquiry",
+      score:3,
+      consultation_done:targetList!=="GCL",
+      agreement_signed:targetList==="ACL",
+      payment_received:targetList==="ACL",
+      invoice_generated:targetList==="ACL",
+      all_doc_received:false,
+      pending_approval:targetList==="GCL"&&currentUser.role!==ROLES.CEO,
+      approved:targetList!=="GCL"||currentUser.role===ROLES.CEO,
+      lost:false,last_contact:tod(),
+      notes:(r.notes||"").trim()?[{id:Date.now()+i,text:r.notes.trim(),by:"Import",at:tod(),type:"Other"}]:[],
+      docs:{},
+      ielts_score:(r.ielts_score||"").trim()||null,
+      intake_target:(r.intake_target||"").trim()||null,
+      last_qualification:(r.last_qualification||"").trim()||null,
+      last_qualification_year:(r.last_qualification_year||"").trim()||null,
+      issue:(r.issue||"").trim()||null,
+      status:(r.status||"").trim()||"New",
+      remarks:(r.remarks||"").trim()||null,
+      enquiry_date:(r.enquiry_date||r.date||"").trim()||tod(),
+      agent_id:null,
+    }));
+    let totalInserted=0;
+    const chunkSize=100;
+    for(let i=0;i<allLeads.length;i+=chunkSize){
+      const chunk=allLeads.slice(i,i+chunkSize);
+      const {data,error}=await supabase.from("leads").insert(chunk).select("id,name");
+      if(!error&&data){
+        totalInserted+=data.length;
+        if(targetList==="GCL"){
+          const taskBatch=data.map(lead=>({title:`Follow up: ${lead.name} (imported)`,client_name:lead.name,lead_id:lead.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true}));
+          await supabase.from("tasks").insert(taskBatch);
+        }
       }
-      count++;
     }
-    setImportCount(count);
+    await leadsDB.reload();
+    setImportCount(totalInserted);
     setImporting(false);setDone(true);setStep(3);
   };
 
@@ -1611,8 +1617,8 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
       )}
 
       {/* Cases table */}
-      <div style={{...S.card,overflow:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+      <div style={{...S.card,overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:1100}}>
           <thead><tr>{["#","Date Added","Client","Country","Current Stage","Docs","Reminders","Officer",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {cases.map((lead,idx)=>{
@@ -1628,7 +1634,7 @@ function Processing({leads,leadsDB,tasksDB,users,currentUser}) {
                   <td style={{...S.td,fontSize:11,color:"#9fa8da",fontWeight:700}}>{idx+1}</td>
                   <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
-                  <td style={S.td}>{lead.country}</td>
+                  <td style={{...S.td,minWidth:130,whiteSpace:"nowrap"}}>{lead.country}</td>
                   <td style={S.td}>
                     <Pill text={lead.stage||"—"} color="#37474f" bg="#f3f4f9"/>
                     <div style={{marginTop:6,background:"#eef0fb",borderRadius:4,height:5}}>
@@ -2164,7 +2170,7 @@ export default function App() {
             {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"24px 28px 60px"}}>
-            <div style={{maxWidth:1140,margin:"0 auto"}}>{renderPage()}</div>
+            <div style={{width:"100%"}}>{renderPage()}</div>
           </div>
         </div>
       </div>
