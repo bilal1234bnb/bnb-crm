@@ -25,6 +25,29 @@ const CONTACT_TYPES = ["Call","WhatsApp","Email","Walk-in","Other"];
 const QUALIFICATIONS = ["Matric (SSC)","Intermediate (HSSC)","O-Levels","A-Levels","Bachelor's Degree","Master's Degree","PhD","Diploma","Other"];
 
 // ─── PROCESSING STAGES (researched, country-specific) ─────────────────────────
+// Map plain country names to PROCESSING_STAGES keys
+const COUNTRY_KEY_MAP = {
+  "UK":"🇬🇧 UK","United Kingdom":"🇬🇧 UK","uk":"🇬🇧 UK",
+  "Australia":"🇦🇺 Australia","AUS":"🇦🇺 Australia","australia":"🇦🇺 Australia",
+  "Canada":"🇨🇦 Canada","CAD":"🇨🇦 Canada","canada":"🇨🇦 Canada",
+  "USA":"🇺🇸 USA","United States":"🇺🇸 USA","usa":"🇺🇸 USA",
+  "Germany":"🇩🇪 Germany","germany":"🇩🇪 Germany",
+  "Ireland":"🇮🇪 Ireland","ireland":"🇮🇪 Ireland",
+  "North Cyprus":"🇨🇾 North Cyprus","N-Cyprus":"🇨🇾 North Cyprus","north cyprus":"🇨🇾 North Cyprus",
+  "South Cyprus":"🇨🇾 South Cyprus","south cyprus":"🇨🇾 South Cyprus",
+  "South Korea":"🇰🇷 South Korea","south korea":"🇰🇷 South Korea",
+  "Malaysia":"🇲🇾 Malaysia","malaysia":"🇲🇾 Malaysia",
+  "Turkey":"🇹🇷 Turkey","turkey":"🇹🇷 Turkey",
+  "Sweden":"🇸🇪 Sweden","sweden":"🇸🇪 Sweden",
+  "Finland":"🇫🇮 Finland","finland":"🇫🇮 Finland",
+  "Italy":"🇮🇹 Italy","italy":"🇮🇹 Italy",
+  "Malta":"🇲🇹 Malta","malta":"🇲🇹 Malta",
+  "New Zealand":"🇳🇿 New Zealand","new zealand":"🇳🇿 New Zealand",
+};
+const getCountryKey = (c) => COUNTRY_KEY_MAP[c] || COUNTRY_KEY_MAP[c?.toLowerCase()] || c || "🇬🇧 UK";
+const getStages = (country) => PROCESSING_STAGES[getCountryKey(country)] || PROCESSING_STAGES["🇬🇧 UK"] || [];
+const getDocs = (country) => PROCESSING_DOCS[getCountryKey(country)] || PROCESSING_DOCS["🇬🇧 UK"] || [];
+
 const PROCESSING_STAGES = {
   "🇬🇧 UK":["Documents Requested","Documents Received","Assessment Finalised","University Application Submitted","Conditional Offer Received","Conditions Being Met","Unconditional Offer Received","CAS Requested","CAS Received","Visa Application Prepared","IHS & Visa Fee Paid","Biometrics Appointment Booked","Biometrics Submitted","Visa Filed","Visa Approved","Visa Rejected","Case Closed"],
   "🇦🇺 Australia":["Documents Requested","Documents Received","Assessment Finalised","University Application Submitted","Conditional Offer Received","Conditions Being Met","Unconditional Offer Received","Fee Invoice Received","University Fee Paid","CoE Requested","CoE Received","OSHC Insurance Arranged","GTE Statement Prepared","Visa Application Prepared","Health Examination Booked","Health Exam Done","Visa Filed","Visa Approved","Visa Rejected","Case Closed"],
@@ -664,7 +687,7 @@ Do you want to proceed anyway? (CEO override)`);
           </div>
           <div style={S.lbl}>Move to Stage</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",maxHeight:200,overflowY:"auto"}}>
-            {(COUNTRY_STAGES[sel.country]||[]).map(stage=><button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>)}
+            {(getStages(sel.country)).map(stage=><button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>)}
           </div>
         </Modal>
       )}
@@ -1837,7 +1860,7 @@ function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUs
   },[leads,currentUser,filterCountry,filterStage,search]);
 
   const countries=["All",...new Set(leads.filter(l=>l.list==="ACL").map(l=>l.country))];
-  const stagesForFilter=filterCountry==="All"?["All"]:["All",...(PROCESSING_STAGES[filterCountry]||[])];
+  const stagesForFilter=filterCountry==="All"?["All"]:["All",...(getStages(filterCountry)||[])];
 
   // Stage stats
   const stageStats={};
@@ -1979,7 +2002,7 @@ Proceed to "${ns}" anyway?`);
       {sel&&(
         <Modal title={`Processing: ${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={720}>
           {/* Progress bar */}
-          {(()=>{const stages=PROCESSING_STAGES[sel.country]||[];const idx=stages.indexOf(sel.stage);const pct=stages.length>0?Math.round((Math.max(idx,0)/stages.length)*100):0;return(
+          {(()=>{const stages=getStages(sel.country);const idx=stages.indexOf(sel.stage);const pct=stages.length>0?Math.round((Math.max(idx,0)/stages.length)*100):0;return(
             <div style={{marginBottom:16}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                 <span style={{fontSize:12,color:"#5c6bc0",fontWeight:700}}>Processing Progress</span>
@@ -1997,7 +2020,7 @@ Proceed to "${ns}" anyway?`);
             <div style={{...S.card,padding:14}}>
               <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Move to Stage</div>
               <div style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
-                {(PROCESSING_STAGES[sel.country]||[]).map(stage=>(
+                {(getStages(sel.country)).map(stage=>(
                   <button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{textAlign:"left",padding:"7px 10px",borderRadius:7,border:"1px solid",borderColor:sel.stage===stage?B.primary:"#e8eaf6",background:sel.stage===stage?B.light:"#f8f9ff",color:sel.stage===stage?B.primary:"#37474f",fontSize:11,fontWeight:sel.stage===stage?700:400,cursor:"pointer"}}>{stage}</button>
                 ))}
               </div>
@@ -2007,7 +2030,7 @@ Proceed to "${ns}" anyway?`);
             <div style={{...S.card,padding:14}}>
               <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Document Checklist</div>
               <div style={{maxHeight:220,overflowY:"auto"}}>
-                {(PROCESSING_DOCS[sel.country]||[]).map(doc=>(
+                {(getDocs(sel.country)).map(doc=>(
                   <Chk key={doc} label={doc} checked={sel.docs?.[`doc_${doc}`]||false} onChange={()=>toggleDoc(sel,doc)}/>
                 ))}
               </div>
