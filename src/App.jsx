@@ -3625,7 +3625,7 @@ function InvoiceTemplateDesigner({currentUser,settings,settingsDB}) {
     if(existing) await settingsDB.update(existing.id,{value:val});
     else await settingsDB.insert({key:"invoice_template",value:val});
     // Also save prefix and terms
-    for(const [k,v] of (["invoice_prefix",tmpl.prefix||"BNB"],["invoice_terms",tmpl.terms||""],["company_name",tmpl.company||""],["address",tmpl.address||""],["phone",tmpl.phone||""]]) {
+    for(const [k,v] of [["invoice_prefix",tmpl.prefix||"BNB"],["invoice_terms",tmpl.terms||""],["company_name",tmpl.company||""],["address",tmpl.address||""],["phone",tmpl.phone||""]]) {
       const ex=settingsDB.data.find(s=>s.key===k);
       if(ex) await settingsDB.update(ex.id,{value:v});
       else await settingsDB.insert({key:k,value:v});
