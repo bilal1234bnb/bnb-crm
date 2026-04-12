@@ -253,67 +253,188 @@ function useTable(tableName, options={}) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage}) {
+function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,users}) {
   const rev=invoices.reduce((a,i)=>a+(i.paid||0),0);
   const pending=leads.filter(l=>l.pending_approval&&!l.approved);
   const openT=tasks.filter(t=>!t.done);
   const overdue=tasks.filter(t=>!t.done&&t.due_date<tod());
-  const won=leads.filter(l=>l.stage==="Visa WON").length;
+  const won=leads.filter(l=>l.stage==="Visa WON"||l.stage==="Visa Approved").length;
   const pipeline=["GCL","PCL","BCL","ACL"].map(list=>({list,count:leads.filter(l=>l.list===list&&!l.lost).length}));
+  const aclLeads=leads.filter(l=>l.list==="ACL"&&!l.lost);
+  const lostLeads=leads.filter(l=>l.lost);
+  const today=tod();
+
+  // Daily call tracking — count notes logged today per staff
+  const allNotes=leads.flatMap(l=>(l.notes||[]).map(n=>({...n,clientName:l.name,list:l.list})));
+  const todayNotes=allNotes.filter(n=>n.date===today||n.at?.slice(0,10)===today);
+  const todayCalls=todayNotes.filter(n=>n.type==="Call"||n.type==="WhatsApp"||n.type==="Walk-in");
+
+  // Staff call stats today
+  const counselors=(users||[]).filter(u=>u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER||u.role===ROLES.PROCESSING);
+  const staffCallStats=counselors.map(u=>({
+    name:u.name.split(" ")[0],
+    calls:todayCalls.filter(n=>n.by===u.name&&(n.type==="Call")).length,
+    whatsapp:todayCalls.filter(n=>n.by===u.name&&n.type==="WhatsApp").length,
+    walkin:todayCalls.filter(n=>n.by===u.name&&n.type==="Walk-in").length,
+    total:todayCalls.filter(n=>n.by===u.name).length,
+  })).filter(s=>s.total>0||true).sort((a,b)=>b.total-a.total);
+
+  // Weekly comm trend (last 7 days)
+  const last7=[...Array(7)].map((_,i)=>{
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toISOString().slice(0,10);
+    return {date:ds.slice(5),calls:allNotes.filter(n=>(n.date===ds||n.at?.slice(0,10)===ds)&&(n.type==="Call"||n.type==="WhatsApp")).length};
+  }).reverse();
+
   return (
     <div>
-      <div style={{marginBottom:22}}><h2 style={S.h2}>Welcome, {currentUser.name} 👋</h2><p style={S.sub}>Border and Bridges Pvt. Ltd. · {tod()}</p></div>
+      <div style={{marginBottom:18}}>
+        <h2 style={S.h2}>Welcome, {currentUser.name} 👋</h2>
+        <p style={S.sub}>Border and Bridges Pvt. Ltd. · {today}</p>
+      </div>
       {currentUser.role===ROLES.CEO&&pending.length>0&&<Alert type="warn" msg={`⚠️ ${pending.length} lead(s) pending your assignment`}/>}
       {overdue.length>0&&<Alert type="error" msg={`🔴 ${overdue.length} task(s) are overdue`}/>}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:14,marginBottom:22}}>
+
+      {/* KPI Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:12,marginBottom:20}}>
         {[
           {label:"Total Leads",value:leads.filter(l=>!l.lost).length,sub:`${leads.filter(l=>l.list==="ACL").length} active`,color:B.primary,icon:"👥",page:"leads"},
-          {label:"Visa WON",value:won,sub:`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`,color:B.success,icon:"✈️",page:"processing"},
-          {label:"Collected",value:`${Math.round(rev/1000)||0}K PKR`,color:B.secondary,icon:"💰",page:"invoices"},
+          {label:"Visa WON",value:won,sub:`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`,color:B.success,icon:"✈️",page:"reporting"},
+          {label:"Collected",value:`PKR ${Math.round(rev/1000)||0}K`,color:B.secondary,icon:"💰",page:"invoices"},
           {label:"Open Tasks",value:openT.length,sub:`${overdue.length} overdue`,color:overdue.length>0?B.danger:B.warn,icon:"✅",page:"tasks"},
           {label:"Pending CEO",value:pending.length,color:"#7c3aed",icon:"⏳",page:"leads"},
           {label:"Win Rate",value:leads.length>0?Math.round((won/leads.length)*100)+"%":"0%",color:B.accent,icon:"📈",page:"reporting"},
-        ].map(({label,value,sub,color,icon,page})=>(
-          <div key={label} onClick={()=>setPage(page)} style={{...S.card,cursor:"pointer",transition:"box-shadow 0.2s",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}
-            onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(45,58,140,0.15)"}
-            onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,0.06)"}>
+          {label:"Today's Comms",value:todayNotes.length,sub:`${todayCalls.length} calls/msgs`,color:"#0891b2",icon:"📞",page:"reporting"},
+          {label:"Active Cases",value:aclLeads.length,sub:"ACL clients",color:"#7c3aed",icon:"📋",page:"cases"},
+        ].map(({label,value,sub,color,icon,page:pg})=>(
+          <div key={label} onClick={()=>pg&&setPage(pg)} style={{...S.card,cursor:pg?"pointer":"default",transition:"box-shadow 0.2s"}}
+            onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 20px rgba(44,55,130,0.15)"}
+            onMouseLeave={e=>e.currentTarget.style.boxShadow="0 2px 12px rgba(44,55,130,0.07)"}>
             <div style={{fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:4}}>{icon} {label}</div>
             <div style={{fontSize:22,fontWeight:900,color}}>{value}</div>
             {sub&&<div style={{fontSize:10,color:"#9fa8da",marginTop:2}}>{sub}</div>}
           </div>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:18}}>
+
+      {/* Pipeline + Today's Calls */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
         <div style={S.card}>
-          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:16}}>Pipeline</div>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:14}}>Pipeline</div>
           {pipeline.map(p=>(
-            <div key={p.list} style={{marginBottom:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+            <div key={p.list} onClick={()=>setPage("leads")} style={{marginBottom:12,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                 <span style={{fontSize:13,fontWeight:700,color:B.dark}}>{p.list}</span>
                 <span style={{fontSize:15,fontWeight:800,color:listC[p.list]}}>{p.count}</span>
               </div>
               <div style={{background:"#eef0fb",borderRadius:6,height:8}}>
-                <div style={{background:listC[p.list],borderRadius:6,height:8,width:`${Math.max((p.count/Math.max(leads.length,1))*100,3)}%`}}/>
+                <div style={{background:listC[p.list],borderRadius:6,height:8,width:`${Math.max((p.count/Math.max(leads.length,1))*100,2)}%`}}/>
               </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:14,fontWeight:700,color:B.dark}}>📞 Today's Calls ({today})</div>
+            <span style={{background:"#e0f2fe",color:"#0369a1",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{todayNotes.length} total</span>
+          </div>
+          {staffCallStats.length===0?(
+            <div style={{textAlign:"center",color:"#9fa8da",padding:16,fontSize:12}}>No communication logged today yet.</div>
+          ):(
+            <div style={{maxHeight:180,overflowY:"auto"}}>
+              {staffCallStats.map(s=>(
+                <div key={s.name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f3f4f9"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:B.dark}}>{s.name}</span>
+                  <div style={{display:"flex",gap:6}}>
+                    {s.calls>0&&<span style={{background:"#d1fae5",color:"#065f46",borderRadius:10,padding:"1px 7px",fontSize:10,fontWeight:700}}>📞 {s.calls}</span>}
+                    {s.whatsapp>0&&<span style={{background:"#dcfce7",color:"#166534",borderRadius:10,padding:"1px 7px",fontSize:10,fontWeight:700}}>💬 {s.whatsapp}</span>}
+                    {s.walkin>0&&<span style={{background:"#ede9fe",color:"#6b21a8",borderRadius:10,padding:"1px 7px",fontSize:10,fontWeight:700}}>🚶 {s.walkin}</span>}
+                    {s.total===0&&<span style={{color:"#9fa8da",fontSize:10}}>—</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Weekly comm trend + Upcoming tasks */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:12}}>📈 7-Day Communication Trend</div>
+          {last7.map((d,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <span style={{fontSize:10,color:"#9fa8da",width:36,flexShrink:0}}>{d.date}</span>
+              <div style={{flex:1,background:"#eef0fb",borderRadius:4,height:14,position:"relative"}}>
+                <div style={{background:B.secondary,borderRadius:4,height:14,width:`${Math.max((d.calls/Math.max(...last7.map(x=>x.calls),1))*100,d.calls>0?5:0)}%`,transition:"width 0.4s"}}/>
+              </div>
+              <span style={{fontSize:10,fontWeight:700,color:B.secondary,width:20,textAlign:"right"}}>{d.calls}</span>
             </div>
           ))}
         </div>
         <div style={S.card}>
           <div style={{fontSize:14,fontWeight:700,color:B.dark,marginBottom:14}}>Upcoming Tasks</div>
-          {openT.slice(0,6).map(t=>(
-            <div key={t.id} style={{display:"flex",gap:10,marginBottom:10,paddingBottom:10,borderBottom:"1px solid #f3f4f9"}}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:priC[t.priority]||"#94a3b8",marginTop:5,flexShrink:0}}/>
-              <div><div style={{fontSize:12,fontWeight:600,color:B.dark,lineHeight:1.3}}>{t.title}</div><div style={{fontSize:11,color:t.due_date<tod()?"#dc2626":"#9fa8da"}}>Due: {t.due_date||"—"}</div></div>
+          {openT.slice(0,5).map(t=>(
+            <div key={t.id} style={{display:"flex",gap:10,marginBottom:8,paddingBottom:8,borderBottom:"1px solid #f3f4f9"}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:t.due_date<today?"#dc2626":priC[t.priority]||"#94a3b8",marginTop:5,flexShrink:0}}/>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:B.dark,lineHeight:1.3}}>{t.title}</div>
+                <div style={{fontSize:10,color:"#9fa8da"}}>Due: {t.due_date} · {(users||[]).find(u=>u.id===t.assigned_to)?.name?.split(" ")[0]||"—"}</div>
+              </div>
             </div>
           ))}
           {openT.length===0&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:16}}>All caught up! 🎉</div>}
         </div>
       </div>
+
+      {/* CEO only: reporting summary */}
+      {currentUser.role===ROLES.CEO&&(
+        <div style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:14,fontWeight:700,color:B.dark}}>📊 Performance Summary</div>
+            <button onClick={()=>setPage("reporting")} style={{...S.ghost,fontSize:11,padding:"4px 12px"}}>Full Reports →</button>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr style={{background:"#f0f4ff"}}>
+                {["Counselor","Leads","ACL","Won","Conv%","Today Calls","Tasks","Overdue"].map(h=>(
+                  <th key={h} style={{padding:"7px 10px",textAlign:"left",fontWeight:700,color:"#5c6bc0",fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {(users||[]).filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active).map((u,i)=>{
+                  const mine=leads.filter(l=>l.assigned_to===u.id);
+                  const acl=mine.filter(l=>l.list==="ACL").length;
+                  const wonU=mine.filter(l=>l.stage==="Visa Approved"||l.stage==="Visa WON").length;
+                  const conv=mine.length>0?Math.round((acl/mine.length)*100):0;
+                  const myTasks=tasks.filter(t=>t.assigned_to===u.id&&!t.done);
+                  const myOverdue=myTasks.filter(t=>t.due_date<today).length;
+                  const myTodayCalls=todayCalls.filter(n=>n.by===u.name).length;
+                  return(
+                    <tr key={u.id} style={{borderBottom:"1px solid #f3f4f9",background:i%2===0?"#fff":"#fafbff"}}>
+                      <td style={{padding:"7px 10px",fontWeight:700,color:B.dark}}>{u.name}</td>
+                      <td style={{padding:"7px 10px"}}>{mine.length}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,color:"#7c3aed"}}>{acl}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,color:B.success}}>{wonU}</td>
+                      <td style={{padding:"7px 10px",fontWeight:700,color:conv>=20?B.success:conv>=10?B.warn:B.danger}}>{conv}%</td>
+                      <td style={{padding:"7px 10px"}}>
+                        <span style={{background:myTodayCalls>0?"#d1fae5":"#f3f4f9",color:myTodayCalls>0?"#065f46":"#9fa8da",borderRadius:10,padding:"2px 8px",fontWeight:700}}>{myTodayCalls}</span>
+                      </td>
+                      <td style={{padding:"7px 10px"}}>{myTasks.length}</td>
+                      <td style={{padding:"7px 10px",fontWeight:myOverdue>0?700:400,color:myOverdue>0?B.danger:"#9fa8da"}}>{myOverdue}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── LEADS (upgraded: new columns, search, PCL reminders, row highlighting) ───
 function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) {
   const [tab,setTab]=useState("GCL");
   const [showAdd,setShowAdd]=useState(false);
@@ -520,6 +641,18 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                   <td style={{...S.td,minWidth:70,maxWidth:100,fontSize:11,wordBreak:"break-word"}}>{lead.country}</td>
                   <td style={{...S.td,minWidth:70,maxWidth:110,fontSize:11,wordBreak:"break-word"}}>{lead.issue||"—"}</td>
                   <td style={{...S.td,maxWidth:90}}><Pill text={lead.status||"New"} color={lead.status==="Active"?"#065f46":lead.status==="Won"?"#1e40af":"#37474f"} bg={lead.status==="Active"?"#d1fae5":lead.status==="Won"?"#dbeafe":"#f3f4f9"}/></td>
+                  <td style={{...S.td,textAlign:"center",minWidth:60}}>
+                    {(()=>{
+                      const n=lead.notes||[];
+                      const t=tod();
+                      const tc=n.filter(x=>(x.date===t||x.at?.slice(0,10)===t)&&(x.type==="Call"||x.type==="WhatsApp"||x.type==="Walk-in"||x.type==="Email")).length;
+                      const total=n.filter(x=>x.type==="Call"||x.type==="WhatsApp"||x.type==="Walk-in"||x.type==="Email").length;
+                      return(<div>
+                        {tc>0&&<div style={{background:"#d1fae5",color:"#065f46",borderRadius:8,padding:"1px 6px",fontSize:9,fontWeight:800,marginBottom:1}}>{tc}✓</div>}
+                        <div style={{fontSize:9,color:"#9fa8da"}}>{total}</div>
+                      </div>);
+                    })()}
+                  </td>
                   <td style={{...S.td,fontSize:11,minWidth:70,maxWidth:120,wordBreak:"break-word"}}>{lead.remarks||"—"}</td>
                   {tab==="PCL"&&<>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder1)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder1)?700:400}}>{lead.reminder1||"—"}</td>
@@ -2661,200 +2794,551 @@ Proceed to "${ns}" anyway?`);
 }
 
 // ─── REPORTING MODULE ─────────────────────────────────────────────────────────
-function Reporting({leads,tasks,invoices,users,currentUser}) {
-  const [tab,setTab]=useState("counselor");
+function Reporting({leads,tasks,invoices,users,currentUser,setPage}) {
+  const [tab,setTab]=useState("executive");
+  const [printMode,setPrintMode]=useState(false);
+  const [selMonth,setSelMonth]=useState(tod().slice(0,7));
+  const [selCounselor,setSelCounselor]=useState("all");
 
-  const counselors=users.filter(u=>u.role===ROLES.COUNSELOR);
-  const processingOfficers=users.filter(u=>u.role===ROLES.PROCESSING);
+  // ── Helpers ──────────────────────────────────────────────
+  const months = [...new Set(leads.map(l=>l.created_at?.slice(0,7)).filter(Boolean))].sort().reverse().slice(0,12);
+  const allStaff = users.filter(u=>u.active);
+  const counselors = users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active);
+  const now = tod();
+  const thisMonth = now.slice(0,7);
+  const lastMonth = new Date(new Date().setMonth(new Date().getMonth()-1)).toISOString().slice(0,7);
 
-  // Counselor KPIs
-  const counselorStats=counselors.map(c=>{
-    const myLeads=leads.filter(l=>l.assigned_to===c.id);
-    const gcl=myLeads.filter(l=>l.list==="GCL").length;
-    const pcl=myLeads.filter(l=>l.list==="PCL").length;
-    const acl=myLeads.filter(l=>l.list==="ACL").length;
-    const won=myLeads.filter(l=>l.stage==="Visa Approved"||l.stage==="PR Approved").length;
-    const lost=myLeads.filter(l=>l.lost).length;
-    const convRate=myLeads.length>0?Math.round((acl/myLeads.length)*100):0;
-    const winRate=acl>0?Math.round((won/Math.max(acl,1))*100):0;
+  const leadsThisMonth = leads.filter(l=>l.created_at?.slice(0,7)===selMonth);
+  const aclLeads = leads.filter(l=>l.list==="ACL"&&!l.lost);
+  const lostLeads = leads.filter(l=>l.lost);
+  const totalInvoiced = invoices.reduce((a,i)=>a+(i.amount||0),0);
+  const totalCollected = invoices.reduce((a,i)=>a+(i.paid||0),0);
+  const outstanding = totalInvoiced - totalCollected;
+  const openTasks = tasks.filter(t=>!t.done);
+  const overdueTasks = tasks.filter(t=>!t.done&&t.due_date<now);
+  const wonLeads = leads.filter(l=>l.stage==="Visa Approved"||l.stage==="Visa WON"||l.stage==="PR Approved");
+  const rejectedLeads = leads.filter(l=>l.stage==="Visa Rejected");
+
+  // Country stats
+  const countryStats = [...new Set(aclLeads.map(l=>l.country).filter(Boolean))].map(country=>({
+    country,
+    count:aclLeads.filter(l=>l.country===country).length,
+    won:wonLeads.filter(l=>l.country===country).length,
+    rejected:rejectedLeads.filter(l=>l.country===country).length,
+  })).sort((a,b)=>b.count-a.count);
+
+  // Source stats
+  const sourceStats = [...new Set(leads.map(l=>l.source).filter(Boolean))].map(src=>({
+    src,
+    total:leads.filter(l=>l.source===src).length,
+    acl:leads.filter(l=>l.source===src&&l.list==="ACL").length,
+    lost:leads.filter(l=>l.source===src&&l.lost).length,
+  })).sort((a,b)=>b.total-a.total);
+
+  // Counselor stats
+  const counselorStats = counselors.map(c=>{
+    const mine=leads.filter(l=>l.assigned_to===c.id);
+    const acl=mine.filter(l=>l.list==="ACL").length;
+    const won=mine.filter(l=>l.stage==="Visa Approved"||l.stage==="Visa WON").length;
+    const lost=mine.filter(l=>l.lost).length;
     const myTasks=tasks.filter(t=>t.assigned_to===c.id);
-    const overdueT=myTasks.filter(t=>!t.done&&t.due_date<tod()).length;
-    return {c,gcl,pcl,acl,won,lost,convRate,winRate,total:myLeads.length,overdueT};
+    const doneTasks=myTasks.filter(t=>t.done).length;
+    const overdue=myTasks.filter(t=>!t.done&&t.due_date<now).length;
+    return {
+      name:c.name,role:c.role,branch:c.branch,
+      total:mine.length,gcl:mine.filter(l=>l.list==="GCL").length,
+      pcl:mine.filter(l=>l.list==="PCL").length,acl,won,lost,
+      convRate:mine.length>0?Math.round((acl/mine.length)*100):0,
+      winRate:acl>0?Math.round((won/Math.max(acl,1))*100):0,
+      tasks:myTasks.length,doneTasks,overdue,
+      taskRate:myTasks.length>0?Math.round((doneTasks/myTasks.length)*100):0,
+    };
   }).sort((a,b)=>b.acl-a.acl);
 
-  // Processing KPIs
-  const processingStats=processingOfficers.map(p=>{
-    const myCases=leads.filter(l=>l.list==="ACL"&&(l.assigned_to===p.id||l.processing_officer===p.id));
-    const won=myCases.filter(l=>l.stage==="Visa Approved"||l.stage==="PR Approved").length;
-    const inProgress=myCases.filter(l=>l.stage!=="Case Closed"&&l.stage!=="Visa Rejected").length;
-    return {p,total:myCases.length,won,inProgress};
-  });
+  // Monthly trend
+  const monthlyTrend = months.slice(0,6).reverse().map(m=>({
+    month:m,
+    newLeads:leads.filter(l=>l.created_at?.slice(0,7)===m).length,
+    acl:leads.filter(l=>l.list==="ACL"&&l.created_at?.slice(0,7)===m).length,
+    revenue:invoices.filter(i=>i.created_at?.slice(0,7)===m).reduce((a,i)=>a+(i.paid||0),0),
+  }));
 
-  // Country breakdown
-  const countryStats=ALL_COUNTRIES.map(country=>{
-    const cLeads=leads.filter(l=>l.country===country&&!l.lost);
-    const acl=cLeads.filter(l=>l.list==="ACL").length;
-    const won=cLeads.filter(l=>l.stage==="Visa Approved"||l.stage==="PR Approved").length;
-    const rejected=cLeads.filter(l=>l.stage==="Visa Rejected"||l.stage==="PR Rejected").length;
-    return {country,total:cLeads.length,acl,won,rejected};
-  }).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+  // Stage distribution for ACL
+  const stageDistribution = [...new Set(aclLeads.map(l=>l.stage).filter(Boolean))].map(stage=>({
+    stage,count:aclLeads.filter(l=>l.stage===stage).length
+  })).sort((a,b)=>b.count-a.count);
 
-  // Company KPIs
-  const totalRev=invoices.reduce((a,i)=>a+(i.paid||0),0);
-  const totalBilled=invoices.reduce((a,i)=>a+(i.amount||0),0);
-  const outstanding=totalBilled-totalRev;
-  const totalLeads=leads.filter(l=>!l.lost).length;
-  const totalACL=leads.filter(l=>l.list==="ACL").length;
-  const totalWon=leads.filter(l=>l.stage==="Visa Approved"||l.stage==="PR Approved").length;
-  const totalLost=leads.filter(l=>l.lost).length;
-  const overallConv=totalLeads>0?Math.round((totalACL/totalLeads)*100):0;
+  // Lost reasons
+  const lostReasons = [...new Set(lostLeads.map(l=>l.lost_reason||l.remarks||"Unknown").filter(Boolean))].slice(0,8).map(r=>({
+    reason:r.slice(0,40),count:lostLeads.filter(l=>(l.lost_reason||l.remarks||"Unknown").startsWith(r.slice(0,20))).length
+  })).sort((a,b)=>b.count-a.count);
 
-  const PdfBtn=({id,title})=><button onClick={()=>printReport(id,title)} style={{...S.ghost,fontSize:11,padding:"5px 12px"}}>🖨️ Print / PDF</button>;
+  // Invoice aging
+  const invoiceAging = {
+    current:invoices.filter(i=>!i.paid||(i.paid>=i.amount)).length,
+    overdue30:invoices.filter(i=>i.paid<i.amount&&i.created_at&&Math.floor((new Date()-new Date(i.created_at))/(1000*60*60*24))<=30).length,
+    overdue60:invoices.filter(i=>i.paid<i.amount&&i.created_at&&Math.floor((new Date()-new Date(i.created_at))/(1000*60*60*24))<=60).length,
+    overdue90:invoices.filter(i=>i.paid<i.amount&&i.created_at&&Math.floor((new Date()-new Date(i.created_at))/(1000*60*60*24))>60).length,
+  };
+
+  // Print function
+  const handlePrint = () => {
+    setPrintMode(true);
+    setTimeout(()=>{ window.print(); setPrintMode(false); }, 300);
+  };
+
+  // PDF download (uses print dialog)
+  const handlePDF = () => {
+    window.alert("In the print dialog that opens:\\n1. Change destination to \\"Save as PDF\\"\\n2. Click Save\\n\\nThis saves the current report as a PDF.");
+    handlePrint();
+  };
+
+  // ── Sub-components ────────────────────────────────────────
+  const RCard=({title,value,sub,color="#2d3a8c",icon})=>(
+    <div style={{background:"#fff",borderRadius:12,padding:"14px 16px",boxShadow:"0 2px 8px rgba(44,55,130,0.07)"}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:4}}>{icon} {title}</div>
+      <div style={{fontSize:24,fontWeight:900,color}}>{value}</div>
+      {sub&&<div style={{fontSize:11,color:"#9fa8da",marginTop:2}}>{sub}</div>}
+    </div>
+  );
+
+  const RTable=({headers,rows,emptyMsg="No data"})=>(
+    <div style={{overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+        <thead><tr style={{background:"#f0f4ff"}}>{headers.map(h=><th key={h} style={{padding:"8px 12px",textAlign:"left",fontWeight:700,color:"#5c6bc0",fontSize:11,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.length===0?<tr><td colSpan={headers.length} style={{padding:24,textAlign:"center",color:"#9fa8da"}}>{emptyMsg}</td></tr>:
+          rows.map((row,i)=><tr key={i} style={{borderBottom:"1px solid #f3f4f9",background:i%2===0?"#fff":"#fafbff"}}>{row.map((cell,j)=><td key={j} style={{padding:"8px 12px",color:"#37474f"}}>{cell}</td>)}</tr>)}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const BarChart=({data,labelKey,valueKey,color=B.primary,max})=>{
+    const m=max||Math.max(...data.map(d=>d[valueKey]||0),1);
+    return(
+      <div>{data.slice(0,8).map((d,i)=>(
+        <div key={i} style={{marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+            <span style={{fontSize:11,color:"#37474f",fontWeight:500}}>{d[labelKey]}</span>
+            <span style={{fontSize:11,fontWeight:700,color}}>{d[valueKey]}</span>
+          </div>
+          <div style={{background:"#eef0fb",borderRadius:4,height:8}}>
+            <div style={{background:color,borderRadius:4,height:8,width:`${Math.round(((d[valueKey]||0)/m)*100)}%`,transition:"width 0.4s"}}/>
+          </div>
+        </div>
+      ))}</div>
+    );
+  };
+
+  // ── Print styles ──────────────────────────────────────────
+  const printStyle = printMode?{background:"#fff",color:"#000",padding:0}:{};
+
+  const TABS = [
+    {key:"executive",label:"📊 Executive"},
+    {key:"counseling",label:"👥 Counseling"},
+    {key:"processing",label:"🔄 Processing"},
+    {key:"financial",label:"💰 Financial"},
+    {key:"hr",label:"👤 HR & Staff"},
+  ];
 
   return (
-    <div>
-      <div style={{marginBottom:18}}><h2 style={S.h2}>Reports & Analytics</h2><p style={S.sub}>Counselor KPIs · Processing performance · Company overview</p></div>
+    <div style={printStyle}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #report-print-area, #report-print-area * { visibility: visible; }
+          #report-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
 
-      <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
-        {[["counselor","Counselor KPIs"],["processing","Processing KPIs"],["country","Country Breakdown"],["company","Company Overview"]].map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k)} style={{padding:"7px 16px",borderRadius:8,border:"2px solid",borderColor:tab===k?B.primary:"#c5cae9",background:tab===k?B.light:"#fff",color:tab===k?B.primary:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{l}</button>
+      {/* Header */}
+      <div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <h2 style={S.h2}>📊 Reports & Analytics</h2>
+          <p style={S.sub}>Performance analysis — Border and Bridges Pvt. Ltd.</p>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <select style={{...S.sel,width:"auto"}} value={selMonth} onChange={e=>setSelMonth(e.target.value)}>
+            {months.map(m=><option key={m} value={m}>{m}</option>)}
+          </select>
+          <button onClick={handlePrint} style={{...S.btn("#475569"),fontSize:12,padding:"8px 16px"}}>🖨️ Print</button>
+          <button onClick={handlePDF} style={{...S.btn(B.danger),fontSize:12,padding:"8px 16px"}}>📄 Save PDF</button>
+        </div>
+      </div>
+
+      {/* Tab navigation */}
+      <div className="no-print" style={{display:"flex",gap:4,marginBottom:20,borderBottom:"2px solid #eef0fb",flexWrap:"wrap"}}>
+        {TABS.map(t=>(
+          <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"10px 16px",borderRadius:"8px 8px 0 0",border:"none",background:tab===t.key?B.primary:"transparent",color:tab===t.key?"#fff":"#5c6bc0",fontSize:13,fontWeight:tab===t.key?700:500,cursor:"pointer"}}>
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {tab==="counselor"&&(
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700,color:B.dark}}>Counselor Performance</div><PdfBtn id="rpt-counselor" title="Counselor KPIs"/></div>
-          <div id="rpt-counselor" style={S.card}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Counselor","Branch","Total Leads","GCL","PCL","ACL","Won","Lost","Conv %","Win %","Overdue Tasks"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {counselorStats.map(({c,gcl,pcl,acl,won,lost,convRate,winRate,total,overdueT})=>(
-                  <tr key={c.id}>
-                    <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{c.name}</div></td>
-                    <td style={S.td}>{c.branch}</td>
-                    <td style={{...S.td,fontWeight:800,color:B.primary}}>{total}</td>
-                    <td style={S.td}>{gcl}</td>
-                    <td style={S.td}>{pcl}</td>
-                    <td style={{...S.td,fontWeight:700,color:B.success}}>{acl}</td>
-                    <td style={{...S.td,fontWeight:700,color:B.secondary}}>{won}</td>
-                    <td style={{...S.td,color:lost>0?"#dc2626":"#9fa8da"}}>{lost}</td>
-                    <td style={S.td}><Pill text={convRate+"%"} color={convRate>=30?B.success:convRate>=15?B.warn:B.danger} bg={convRate>=30?"#d1fae5":convRate>=15?"#fffde7":"#fee2e2"}/></td>
-                    <td style={S.td}><Pill text={winRate+"%"} color={winRate>=60?B.success:winRate>=30?B.warn:B.danger} bg={winRate>=60?"#d1fae5":winRate>=30?"#fffde7":"#fee2e2"}/></td>
-                    <td style={S.td}>{overdueT>0?<Pill text={overdueT+" overdue"} color="#9b1c1c" bg="#fee2e2"/>:<Pill text="None" color="#065f46" bg="#d1fae5"/>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {counselorStats.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No counselors yet.</div>}
+      <div id="report-print-area">
+        {/* Print header */}
+        {printMode&&(
+          <div style={{borderBottom:"2px solid #2d3a8c",paddingBottom:12,marginBottom:20}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#1a2057"}}>Border and Bridges Pvt. Ltd.</div>
+            <div style={{fontSize:13,color:"#5c6bc0"}}>{TABS.find(t=>t.key===tab)?.label} Report · Generated: {now} · By: {currentUser.name}</div>
           </div>
-        </div>
-      )}
+        )}
 
-      {tab==="processing"&&(
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700,color:B.dark}}>Processing Officer Performance</div><PdfBtn id="rpt-proc" title="Processing KPIs"/></div>
-          <div id="rpt-proc" style={S.card}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Officer","Total Cases","In Progress","Visa Won","Win Rate"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {processingStats.map(({p,total,won,inProgress})=>{
-                  const wr=total>0?Math.round((won/total)*100):0;
-                  return (
-                    <tr key={p.id}>
-                      <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{p.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{p.branch}</div></td>
-                      <td style={{...S.td,fontWeight:800}}>{total}</td>
-                      <td style={{...S.td,color:B.secondary,fontWeight:700}}>{inProgress}</td>
-                      <td style={{...S.td,color:B.success,fontWeight:700}}>{won}</td>
-                      <td style={S.td}><Pill text={wr+"%"} color={wr>=60?B.success:wr>=30?B.warn:B.danger} bg={wr>=60?"#d1fae5":wr>=30?"#fffde7":"#fee2e2"}/></td>
-                    </tr>
-                  );
+        {/* ── TAB 1: EXECUTIVE SUMMARY ─────────────────── */}
+        {(tab==="executive"||printMode)&&(
+          <div style={{marginBottom:32}}>
+            {printMode&&<div style={{fontSize:16,fontWeight:800,color:"#1a2057",marginBottom:12}}>📊 Executive Summary</div>}
+
+            {/* KPI Cards */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+              <RCard icon="👥" title="Total Leads" value={leads.filter(l=>!l.lost).length} sub={`${leadsThisMonth.length} this month`} color={B.primary}/>
+              <RCard icon="✈️" title="Visa Won" value={wonLeads.length} sub={`${rejectedLeads.length} rejected`} color={B.success}/>
+              <RCard icon="💰" title="Revenue" value={`${Math.round(totalCollected/1000)}K`} sub={`PKR ${totalInvoiced.toLocaleString()} invoiced`} color={B.secondary}/>
+              <RCard icon="📋" title="Active Cases" value={aclLeads.length} sub="ACL clients" color="#7c3aed"/>
+              <RCard icon="⏳" title="Outstanding" value={`${Math.round(outstanding/1000)}K`} sub="PKR unpaid" color={outstanding>0?B.warn:B.success}/>
+              <RCard icon="✅" title="Open Tasks" value={openTasks.length} sub={`${overdueTasks.length} overdue`} color={overdueTasks.length>0?B.danger:B.warn}/>
+              <RCard icon="📉" title="Lost Leads" value={lostLeads.length} sub={`${leads.length>0?Math.round((lostLeads.length/leads.length)*100):0}% loss rate`} color={B.danger}/>
+              <RCard icon="📈" title="Win Rate" value={`${aclLeads.length>0?Math.round((wonLeads.length/Math.max(aclLeads.length,1))*100):0}%`} sub="ACL to visa" color={B.accent}/>
+            </div>
+
+            {/* Pipeline + Monthly Trend */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📋 Pipeline Status</div>
+                {["GCL","PCL","BCL","ACL"].map(list=>{
+                  const count=leads.filter(l=>l.list===list&&!l.lost).length;
+                  const pct=leads.length>0?Math.round((count/leads.length)*100):0;
+                  return(<div key={list} style={{marginBottom:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{fontSize:12,fontWeight:700,color:listC[list]}}>{list}</span>
+                      <span style={{fontSize:13,fontWeight:800,color:listC[list]}}>{count}</span>
+                    </div>
+                    <div style={{background:"#eef0fb",borderRadius:6,height:8}}>
+                      <div style={{background:listC[list],borderRadius:6,height:8,width:`${pct}%`}}/>
+                    </div>
+                  </div>);
                 })}
-              </tbody>
-            </table>
-            {processingStats.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No processing officers yet.</div>}
-            <div style={{marginTop:16,padding:"12px 14px",background:"#f8f9ff",borderRadius:8}}>
-              <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Stage Breakdown — All ACL Cases</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {Object.entries(leads.filter(l=>l.list==="ACL").reduce((acc,l)=>{acc[l.stage]=(acc[l.stage]||0)+1;return acc;},{}) ).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([stage,count])=>(
-                  <div key={stage} style={{padding:"4px 10px",background:B.light,borderRadius:20,fontSize:11,color:B.primary,fontWeight:700}}>{stage}: {count}</div>
-                ))}
+              </div>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📅 Monthly Trend (Last 6)</div>
+                <RTable
+                  headers={["Month","New Leads","Active","Revenue (K)"]}
+                  rows={monthlyTrend.map(m=>[
+                    m.month,
+                    <span style={{fontWeight:700,color:B.primary}}>{m.newLeads}</span>,
+                    <span style={{fontWeight:700,color:"#7c3aed"}}>{m.acl}</span>,
+                    <span style={{fontWeight:700,color:B.success}}>PKR {Math.round(m.revenue/1000)}K</span>
+                  ])}
+                />
               </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {tab==="country"&&(
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700,color:B.dark}}>Country Breakdown</div><PdfBtn id="rpt-country" title="Country Breakdown"/></div>
-          <div id="rpt-country" style={S.card}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Country","Total Leads","ACL (Active)","Visa Won","Visa Rejected","Win Rate"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {countryStats.map(({country,total,acl,won,rejected})=>{
-                  const wr=acl>0?Math.round((won/acl)*100):0;
-                  return (
-                    <tr key={country}>
-                      <td style={{...S.td,fontWeight:700}}>{country}</td>
-                      <td style={S.td}>{total}</td>
-                      <td style={{...S.td,color:B.success,fontWeight:700}}>{acl}</td>
-                      <td style={{...S.td,color:B.secondary,fontWeight:700}}>{won}</td>
-                      <td style={{...S.td,color:rejected>0?"#dc2626":"#9fa8da"}}>{rejected}</td>
-                      <td style={S.td}><Pill text={wr+"%"} color={wr>=60?B.success:wr>=30?B.warn:B.danger} bg={wr>=60?"#d1fae5":wr>=30?"#fffde7":"#fee2e2"}/></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab==="company"&&(
-        <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700,color:B.dark}}>Company Overview</div><PdfBtn id="rpt-company" title="Company Overview"/></div>
-          <div id="rpt-company">
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:14,marginBottom:20}}>
-              <Stat label="Total Revenue" value={fmt(totalRev)} color={B.success} icon="💰"/>
-              <Stat label="Outstanding" value={fmt(outstanding)} color={B.danger} icon="⏳"/>
-              <Stat label="Total Leads" value={totalLeads} color={B.primary} icon="👥"/>
-              <Stat label="Active Cases" value={totalACL} color={B.secondary} icon="📋"/>
-              <Stat label="Total WON" value={totalWon} color="#7c3aed" icon="🎉"/>
-              <Stat label="Total Lost" value={totalLost} color={B.warn} icon="💀"/>
-              <Stat label="Overall Conv." value={overallConv+"%"} color={B.accent} icon="📈"/>
-              <Stat label="Staff Members" value={users.length} color={B.dark} icon="👤"/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
-              <div style={S.card}>
-                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Revenue Breakdown</div>
-                {[["Total Billed",totalBilled,B.primary],["Collected",totalRev,B.success],["Outstanding",outstanding,B.danger]].map(([l,v,c])=>(
-                  <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f3f4f9"}}>
-                    <span style={{fontSize:13,color:"#37474f"}}>{l}</span>
-                    <span style={{fontSize:14,fontWeight:800,color:c}}>{fmt(v)}</span>
+            {/* Pending actions */}
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>⚠️ Pending Actions (CEO)</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
+                {[
+                  {label:"Leads pending assignment",val:leads.filter(l=>l.pending_approval&&!l.approved).length,color:B.warn},
+                  {label:"Overdue tasks",val:overdueTasks.length,color:B.danger},
+                  {label:"Unpaid invoices",val:invoices.filter(i=>i.paid<i.amount).length,color:"#f59e0b"},
+                  {label:"ACL docs incomplete",val:aclLeads.filter(l=>!l.all_doc_received).length,color:"#7c3aed"},
+                ].map(({label,val,color})=>(
+                  <div key={label} style={{background:val>0?"#fff7ed":"#f0fdf4",borderRadius:8,padding:"10px 14px",border:`1px solid ${val>0?"#fed7aa":"#bbf7d0"}`}}>
+                    <div style={{fontSize:20,fontWeight:900,color}}>{val}</div>
+                    <div style={{fontSize:11,color:"#5c6bc0"}}>{label}</div>
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 2: COUNSELING ─────────────────────────── */}
+        {(tab==="counseling"||printMode)&&(
+          <div style={{marginBottom:32}}>
+            {printMode&&<div style={{fontSize:16,fontWeight:800,color:"#1a2057",margin:"20px 0 12px"}}>👥 Counseling Performance</div>}
+
+            {/* Counselor performance table */}
+            <div style={{...S.card,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>👥 Counselor Performance Report</div>
+              <RTable
+                headers={["Counselor","Branch","Total","GCL","PCL","ACL","Won","Lost","Conv%","Win%","Tasks","Overdue"]}
+                rows={counselorStats.map(c=>[
+                  <strong>{c.name}</strong>,
+                  c.branch?.split(" ")[0]||"HQ",
+                  c.total,c.gcl,c.pcl,
+                  <span style={{fontWeight:700,color:"#7c3aed"}}>{c.acl}</span>,
+                  <span style={{fontWeight:700,color:B.success}}>{c.won}</span>,
+                  <span style={{color:c.lost>0?B.danger:"#9fa8da"}}>{c.lost}</span>,
+                  <span style={{fontWeight:700,color:c.convRate>=20?B.success:c.convRate>=10?B.warn:B.danger}}>{c.convRate}%</span>,
+                  <span style={{fontWeight:700,color:c.winRate>=50?B.success:B.warn}}>{c.winRate}%</span>,
+                  c.tasks,
+                  <span style={{color:c.overdue>0?B.danger:"#9fa8da",fontWeight:c.overdue>0?700:400}}>{c.overdue}</span>
+                ])}
+                emptyMsg="No counselors found"
+              />
+            </div>
+
+            {/* Source Analysis */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
               <div style={S.card}>
-                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Pipeline Summary</div>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>🔗 Source Analysis</div>
+                <RTable
+                  headers={["Source","Total","ACL","Lost","Conv%"]}
+                  rows={sourceStats.slice(0,8).map(s=>[
+                    s.src,s.total,
+                    <span style={{color:"#7c3aed",fontWeight:700}}>{s.acl}</span>,
+                    <span style={{color:s.lost>0?B.danger:"#9fa8da"}}>{s.lost}</span>,
+                    <span style={{fontWeight:700,color:s.total>0&&s.acl/s.total>=0.2?B.success:B.warn}}>{s.total>0?Math.round((s.acl/s.total)*100):0}%</span>
+                  ])}
+                />
+              </div>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📉 Lost Leads Analysis</div>
+                <RTable
+                  headers={["Reason","Count"]}
+                  rows={lostReasons.map(r=>[r.reason,<span style={{fontWeight:700,color:B.danger}}>{r.count}</span>])}
+                  emptyMsg="No lost leads"
+                />
+              </div>
+            </div>
+
+            {/* Monthly new leads */}
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📅 Monthly Lead Intake ({selMonth})</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
                 {["GCL","PCL","BCL","ACL"].map(list=>{
-                  const count=leads.filter(l=>l.list===list&&!l.lost).length;
-                  return (
-                    <div key={list} style={{marginBottom:10}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,color:B.dark,fontWeight:600}}>{list}</span><span style={{fontWeight:800,color:listC[list]}}>{count}</span></div>
-                      <div style={{background:"#eef0fb",borderRadius:4,height:7}}><div style={{background:listC[list],borderRadius:4,height:7,width:`${Math.max((count/Math.max(totalLeads,1))*100,2)}%`}}/></div>
+                  const count=leadsThisMonth.filter(l=>l.list===list).length;
+                  return(
+                    <div key={list} style={{background:B.light,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:900,color:listC[list]}}>{count}</div>
+                      <div style={{fontSize:11,color:"#9fa8da",fontWeight:600}}>{list} this month</div>
                     </div>
                   );
                 })}
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* ── TAB 3: PROCESSING ─────────────────────────── */}
+        {(tab==="processing"||printMode)&&(
+          <div style={{marginBottom:32}}>
+            {printMode&&<div style={{fontSize:16,fontWeight:800,color:"#1a2057",margin:"20px 0 12px"}}>🔄 Processing Report</div>}
+
+            {/* Stage distribution */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📍 Stage Distribution (ACL)</div>
+                <BarChart data={stageDistribution} labelKey="stage" valueKey="count" color={B.primary}/>
+              </div>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>🌍 Country Distribution</div>
+                <BarChart data={countryStats} labelKey="country" valueKey="count" color="#7c3aed"/>
+              </div>
+            </div>
+
+            {/* Detailed processing table */}
+            <div style={{...S.card,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📊 Processing Status by Country</div>
+              <RTable
+                headers={["Country","Total","Won","Rejected","Win Rate","Avg Docs"]}
+                rows={countryStats.map(c=>{
+                  const ctryLeads=aclLeads.filter(l=>l.country===c.country);
+                  const docPct=ctryLeads.length>0?Math.round(ctryLeads.filter(l=>l.all_doc_received).length/ctryLeads.length*100):0;
+                  return[
+                    <strong>{c.country}</strong>,c.count,
+                    <span style={{color:B.success,fontWeight:700}}>{c.won}</span>,
+                    <span style={{color:B.danger}}>{c.rejected}</span>,
+                    <span style={{fontWeight:700,color:c.count>0&&c.won/c.count>=0.5?B.success:B.warn}}>{c.count>0?Math.round((c.won/c.count)*100):0}%</span>,
+                    <span style={{color:docPct>=80?B.success:B.warn}}>{docPct}% docs</span>
+                  ];
+                })}
+                emptyMsg="No active cases"
+              />
+            </div>
+
+            {/* Intake distribution */}
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📅 Intake Distribution</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {[...new Set(aclLeads.map(l=>l.intake).filter(Boolean))].map(intake=>{
+                  const count=aclLeads.filter(l=>l.intake===intake).length;
+                  return(<div key={intake} style={{background:B.light,borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:800,color:B.primary}}>{count}</div>
+                    <div style={{fontSize:11,color:"#9fa8da"}}>{intake}</div>
+                  </div>);
+                })}
+                {aclLeads.filter(l=>!l.intake).length>0&&(
+                  <div style={{background:"#fee2e2",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:800,color:B.danger}}>{aclLeads.filter(l=>!l.intake).length}</div>
+                    <div style={{fontSize:11,color:"#9fa8da"}}>No Intake Set</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 4: FINANCIAL ──────────────────────────── */}
+        {(tab==="financial"||printMode)&&(
+          <div style={{marginBottom:32}}>
+            {printMode&&<div style={{fontSize:16,fontWeight:800,color:"#1a2057",margin:"20px 0 12px"}}>💰 Financial Report</div>}
+
+            {/* Financial KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:20}}>
+              <RCard icon="💰" title="Total Invoiced" value={`PKR ${Math.round(totalInvoiced/1000)}K`} color={B.secondary}/>
+              <RCard icon="✅" title="Collected" value={`PKR ${Math.round(totalCollected/1000)}K`} sub={`${totalInvoiced>0?Math.round((totalCollected/totalInvoiced)*100):0}% collection rate`} color={B.success}/>
+              <RCard icon="⏳" title="Outstanding" value={`PKR ${Math.round(outstanding/1000)}K`} sub="Unpaid balance" color={outstanding>0?B.warn:B.success}/>
+              <RCard icon="🧾" title="Total Invoices" value={invoices.length} sub={`${invoices.filter(i=>i.paid>=i.amount).length} fully paid`} color={B.primary}/>
+            </div>
+
+            {/* Revenue trend + Outstanding clients */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📈 Revenue Trend</div>
+                <RTable
+                  headers={["Month","Invoiced","Collected","Rate"]}
+                  rows={months.slice(0,6).map(m=>({
+                    m,
+                    inv:invoices.filter(i=>i.created_at?.slice(0,7)===m).reduce((a,i)=>a+(i.amount||0),0),
+                    paid:invoices.filter(i=>i.created_at?.slice(0,7)===m).reduce((a,i)=>a+(i.paid||0),0),
+                  })).map(({m,inv,paid})=>[
+                    m,
+                    `PKR ${Math.round(inv/1000)}K`,
+                    <span style={{color:B.success,fontWeight:700}}>PKR {Math.round(paid/1000)}K</span>,
+                    <span style={{fontWeight:700,color:inv>0&&paid/inv>=0.8?B.success:B.warn}}>{inv>0?Math.round((paid/inv)*100):0}%</span>
+                  ])}
+                />
+              </div>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📋 Invoice Aging</div>
+                {[
+                  {label:"Fully Paid",val:invoiceAging.current,color:B.success,bg:"#d1fae5"},
+                  {label:"Overdue ≤30 days",val:invoiceAging.overdue30,color:B.warn,bg:"#fef3c7"},
+                  {label:"Overdue ≤60 days",val:invoiceAging.overdue60,color:"#f59e0b",bg:"#fef9c3"},
+                  {label:"Overdue >60 days",val:invoiceAging.overdue90,color:B.danger,bg:"#fee2e2"},
+                ].map(({label,val,color,bg})=>(
+                  <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:bg,borderRadius:8,marginBottom:6}}>
+                    <span style={{fontSize:12,color:"#374151"}}>{label}</span>
+                    <span style={{fontSize:16,fontWeight:800,color}}>{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Outstanding clients */}
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>⚠️ Outstanding Payments</div>
+              <RTable
+                headers={["Client","Invoice Amount","Paid","Outstanding","Status"]}
+                rows={invoices.filter(i=>i.paid<i.amount).slice(0,10).map(i=>[
+                  i.client_name,
+                  `PKR ${(i.amount||0).toLocaleString()}`,
+                  <span style={{color:B.success}}>PKR {(i.paid||0).toLocaleString()}</span>,
+                  <span style={{color:B.danger,fontWeight:700}}>PKR {((i.amount||0)-(i.paid||0)).toLocaleString()}</span>,
+                  <Pill text={i.paid>0?"Partial":"Unpaid"} color={i.paid>0?"#854d0e":B.danger} bg={i.paid>0?"#fef3c7":"#fee2e2"}/>
+                ])}
+                emptyMsg="✅ No outstanding payments"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 5: HR & STAFF ─────────────────────────── */}
+        {(tab==="hr"||printMode)&&(
+          <div style={{marginBottom:32}}>
+            {printMode&&<div style={{fontSize:16,fontWeight:800,color:"#1a2057",margin:"20px 0 12px"}}>👤 HR & Staff Report</div>}
+
+            {/* Staff performance */}
+            <div style={{...S.card,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>👤 Staff Performance Overview</div>
+              <RTable
+                headers={["Name","Role","Branch","Total Tasks","Done","Pending","Overdue","Completion%"]}
+                rows={allStaff.map(u=>{
+                  const myT=tasks.filter(t=>t.assigned_to===u.id);
+                  const done=myT.filter(t=>t.done).length;
+                  const pending=myT.filter(t=>!t.done).length;
+                  const overdue=myT.filter(t=>!t.done&&t.due_date<now).length;
+                  const rate=myT.length>0?Math.round((done/myT.length)*100):0;
+                  return[
+                    <strong>{u.name}</strong>,
+                    <Pill text={u.role} color="#5c6bc0" bg="#eef0fb"/>,
+                    u.branch?.split(" ")[0]||"HQ",
+                    myT.length,
+                    <span style={{color:B.success,fontWeight:700}}>{done}</span>,
+                    pending,
+                    <span style={{color:overdue>0?B.danger:"#9fa8da",fontWeight:overdue>0?700:400}}>{overdue}</span>,
+                    <span style={{fontWeight:700,color:rate>=80?B.success:rate>=50?B.warn:B.danger}}>{rate}%</span>
+                  ];
+                })}
+                emptyMsg="No staff found"
+              />
+            </div>
+
+            {/* Daily Communication Tracker */}
+            <div style={{...S.card,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📞 Daily Communication Performance ({selMonth})</div>
+              <RTable
+                headers={["Staff","Role","Total Comms","Calls","WhatsApp","Emails","Walk-in","Avg/Day"]}
+                rows={allStaff.map(u=>{
+                  const allUserNotes=leads.flatMap(l=>(l.notes||[]).filter(n=>n.by===u.name));
+                  const monthNotes=allUserNotes.filter(n=>(n.date||n.at?.slice(0,10))?.slice(0,7)===selMonth);
+                  const calls=monthNotes.filter(n=>n.type==="Call").length;
+                  const wa=monthNotes.filter(n=>n.type==="WhatsApp").length;
+                  const email=monthNotes.filter(n=>n.type==="Email").length;
+                  const walkin=monthNotes.filter(n=>n.type==="Walk-in").length;
+                  const daysInMonth=new Date(selMonth.slice(0,4),selMonth.slice(5,7),0).getDate();
+                  const avg=Math.round(monthNotes.length/daysInMonth*10)/10;
+                  return[
+                    <strong>{u.name}</strong>,
+                    <Pill text={u.role} color="#5c6bc0" bg="#eef0fb"/>,
+                    <span style={{fontWeight:700,color:B.primary}}>{monthNotes.length}</span>,
+                    <span style={{color:"#059669",fontWeight:calls>0?700:400}}>{calls}</span>,
+                    <span style={{color:"#25d366",fontWeight:wa>0?700:400}}>{wa}</span>,
+                    <span style={{color:"#1a91c7",fontWeight:email>0?700:400}}>{email}</span>,
+                    <span style={{color:"#7c3aed",fontWeight:walkin>0?700:400}}>{walkin}</span>,
+                    <span style={{fontWeight:700,color:avg>=3?B.success:avg>=1?B.warn:B.danger}}>{avg}/day</span>
+                  ];
+                })}
+              />
+            </div>
+
+            {/* Task breakdown by type */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📋 Tasks by Type</div>
+                <RTable
+                  headers={["Type","Total","Done","Pending"]}
+                  rows={[...new Set(tasks.map(t=>t.type).filter(Boolean))].map(type=>({
+                    type,
+                    total:tasks.filter(t=>t.type===type).length,
+                    done:tasks.filter(t=>t.type===type&&t.done).length,
+                    pending:tasks.filter(t=>t.type===type&&!t.done).length,
+                  })).sort((a,b)=>b.total-a.total).map(({type,total,done,pending})=>[
+                    type,total,
+                    <span style={{color:B.success}}>{done}</span>,
+                    <span style={{color:pending>0?B.warn:"#9fa8da"}}>{pending}</span>
+                  ])}
+                />
+              </div>
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📊 Lead Assignment Distribution</div>
+                <BarChart
+                  data={counselorStats.map(c=>({name:c.name.split(" ")[0],total:c.total}))}
+                  labelKey="name" valueKey="total" color={B.secondary}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── ACTIVITY LOG ─────────────────────────────────────────────────────────────
 function ActivityLog({currentUser}) {
   const logDB=useTable("audit_log",{orderBy:"created_at",asc:false});
   const [filterUser,setFilterUser]=useState("All");
@@ -3565,7 +4049,7 @@ function Expenses({currentUser,settings}) {
   const [form,setForm]=useState(EF);
 
   const cats=settings?.expense_categories?JSON.parse(settings.expense_categories):EXPENSE_CATEGORIES_DEFAULT;
-  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role===ROLES.FINANCE;
 
   const filtered=expDB.data.filter(e=>{
     if(filterMonth&&!e.date?.startsWith(filterMonth))return false;
@@ -3671,7 +4155,7 @@ function PettyCash({currentUser}) {
   const EF={date:tod(),type:"Out",description:"",amount:"",received_from:"",paid_to:"",notes:""};
   const [form,setForm]=useState(EF);
 
-  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role===ROLES.FINANCE;
   const filtered=pcDB.data.filter(e=>!filterMonth||e.date?.startsWith(filterMonth));
 
   // Calculate running balance
@@ -3757,6 +4241,8 @@ function Attendance({users,currentUser}) {
   const attDB=useTable("attendance",{orderBy:"date",asc:false});
   const [selDate,setSelDate]=useState(tod());
   const [filterBranch,setFilterBranch]=useState(currentUser.branch||"Lahore (HQ)");
+  // Finance Officer can view but not mark attendance
+  const isViewOnly=currentUser.role===ROLES.FINANCE;
 
   const canMark=(date)=>{
     if(currentUser.role===ROLES.CEO) return true; // CEO can edit any date
@@ -3942,7 +4428,7 @@ function Payroll({users,currentUser,invoices}) {
   const [showAdvance,setShowAdvance]=useState(null);
   const [showSlip,setShowSlip]=useState(null);
 
-  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role===ROLES.FINANCE;
   if(!canAccess)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 Access restricted.</div>;
 
   const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO);
@@ -4155,8 +4641,8 @@ function StaffLedger({users,currentUser}) {
   const advanceDB=useTable("salary_advances",{orderBy:"date",asc:false});
   const [selUser,setSelUser]=useState("");
 
-  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS;
-  if(!canAccess)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role===ROLES.FINANCE;
+  if(!canAccess)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 Access restricted.</div>;
 
   const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO);
   const userSalaries=salaryDB.data.filter(s=>!selUser||s.user_id===selUser);
@@ -5159,12 +5645,12 @@ export default function App() {
   const renderPage=()=>{
     if(leadsDB.loading)return <Spin/>;
     switch(page){
-      case "dashboard":     return <Dashboard {...props} setPage={setPage}/>;
+      case "dashboard":     return <Dashboard {...props} setPage={setPage} users={usersDB.data}/>;
       case "leads":         return <Leads {...props}/>;
       case "cases":         return <Cases {...props} invoices={invoicesDB.data}/>;
       case "tasks":         return <Tasks {...props} leads={leadsDB.data}/>;
       case "processing":    return <Processing {...props}/>;
-      case "reporting":     return <Reporting {...props}/>;
+      case "reporting":     return <Reporting {...props} setPage={setPage}/>;
       case "activitylog":   return <ActivityLog {...props}/>;
       case "whatsapp":      return <WhatsAppInbox {...props}/>;
       case "notifications": return <Notifications {...props}/>;
