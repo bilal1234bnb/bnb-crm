@@ -3820,13 +3820,12 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
       setProgress(Math.round((i/ACL_DATA.length)*100));
       try{
         // Check if already exists
-        // Case-insensitive duplicate check by name OR phone
+        // Case-insensitive duplicate check via direct DB query
         const clientNameLower = client.name.toLowerCase().trim();
-        const existing = leadsDB.data?.find(l =>
-          l.list === "ACL" && !l.lost &&
-          (l.name?.toLowerCase().trim() === clientNameLower ||
-           (client.phone && l.phone && l.phone.trim() === client.phone.trim()))
-        );
+        const {data:dupCheck} = await supabase.from("leads")
+          .select("id").eq("list","ACL")
+          .ilike("name", client.name.trim()).limit(1);
+        const existing = dupCheck && dupCheck.length > 0;
         if(existing){logs.push({name:client.name,status:"skipped",reason:"Already exists"});continue;}
         
         const leadData={
@@ -3863,11 +3862,16 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           invoice_generated:true,
           created_at:new Date().toISOString(),
         };
-        await leadsDB.insert(leadData);
+        // Use direct supabase insert for reliability
+        const {error:insertError} = await supabase.from("leads").insert(leadData);
+        if(insertError){
+          logs.push({name:client.name,status:"error",reason:insertError.message});
+          continue;
+        }
         
-        // Create follow-up task
+        // Create follow-up task if todo exists
         if(client.todo&&client.todo.trim()){
-          await tasksDB.insert({
+          await supabase.from("tasks").insert({
             title:`Follow up: ${client.name}`,
             client_name:client.name,
             assigned_to:currentUser.id,
@@ -3875,7 +3879,6 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
             priority:"High",
             type:"Follow-up",
             auto_generated:true,
-            notes:client.todo,
           });
         }
         logs.push({name:client.name,status:"imported",stage:client.processing_stage,agent:client.external_agent_name||client.referred_by_staff||"Direct"});
