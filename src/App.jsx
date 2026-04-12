@@ -143,7 +143,7 @@ const Chk = ({label,checked,onChange}) => <label style={{display:"flex",alignIte
 const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c5100"},error:{bg:"#fce4ec",b:"#e91e63",t:"#880e4f"},info:{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"},success:{bg:"#e8f5e9",b:"#43a047",t:"#1b5e20"}}[type]||{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"}; return <div style={{background:c.bg,border:`1px solid ${c.b}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:c.t,marginBottom:12}}>{msg}</div>; };
 const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
-const isMobile = () => window.innerWidth <= 768;
+const isMobile = () => typeof window !== 'undefined' && window.innerWidth <= 768;
 
 // ── Toast Notification System ─────────────────────────────────
 const ToastContext = React.createContext(null);
