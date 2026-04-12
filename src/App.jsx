@@ -9,7 +9,7 @@ const B = {
   grad:"linear-gradient(135deg,#1a2057 0%,#2d3a8c 50%,#1a91c7 100%)",
 };
 
-const ROLES = { CEO:"CEO", COUNSELOR:"Counselor", PROCESSING:"Processing Officer", ACCOUNTS:"Accounts", BRANCH_MANAGER:"Branch Manager" };
+const ROLES = { CEO:"CEO", COUNSELOR:"Counselor", PROCESSING:"Processing Officer", ACCOUNTS:"Accounts", BRANCH_MANAGER:"Branch Manager", FINANCE:"Finance Officer" };
 const BRANCHES_DEFAULT = ["Lahore (HQ)","Karachi","Islamabad"];
 const ALL_COUNTRIES = [
   "🇬🇧 UK","🇦🇺 Australia","🇺🇸 USA","🇨🇦 Canada",
@@ -2481,12 +2481,1247 @@ This cannot be undone. All data for this lead will be lost forever.`))return;
   );
 }
 
+
+// ─── SERVICES & CONSTANTS ─────────────────────────────────────────────────────
+const FINANCE_SERVICES = {
+  "Consultancy & Advisory": [
+    "Consultation Fee","Profile Assessment","Eligibility Assessment",
+    "DIP (Diploma Pathway)","Profile Building","Career Counselling"
+  ],
+  "Student Visa Services": [
+    "Student Visa Application (UK)","Student Visa Application (Australia)",
+    "Student Visa Application (Canada)","Student Visa Application (USA)",
+    "Student Visa Application (Germany)","Student Visa Application (Other Country)",
+    "CAS / CoE / I-20 Assistance","SOP / Personal Statement Writing",
+    "University Application Submission","Conditional Offer Follow-up",
+    "Unconditional Offer Follow-up"
+  ],
+  "Immigration Services": [
+    "PR Application (Canada Express Entry)","PR Application (Australia SkillSelect)",
+    "Germany Opportunity Card","Germany Job Seeker Visa",
+    "Work Permit Application","Dependent / Family Visa"
+  ],
+  "Document Services": ["Blocked Account / GIC Arrangement"],
+  "Financial Services": [
+    "Bank Statement Preparation Advisory","Proof of Funds Advisory",
+    "Scholarship Application Assistance","Education Loan Advisory"
+  ],
+  "Test Preparation": [
+    "IELTS Preparation","PTE Preparation","TOEFL Preparation",
+    "German Language (A1/A2/B1/B2)","APS Certificate Assistance (Germany)"
+  ],
+  "Agent / B2B Services": [
+    "Sub-Agent Commission","University Commission Claim","Referral Fee"
+  ],
+};
+const ALL_SERVICES = Object.values(FINANCE_SERVICES).flat();
+const PAYMENT_METHODS = ["Cash","Bank Transfer","Cheque","EasyPaisa","JazzCash","Credit/Debit Card","Online Transfer"];
+const INVOICE_TYPES = {CLIENT:"Client Invoice", COMMISSION:"University Commission", AGENT_PAYABLE:"Agent Payable (B2B)"};
+const FOREIGN_CURRENCIES = ["GBP","USD","AUD","CAD","EUR"];
+const EXPENSE_CATEGORIES_DEFAULT = ["Staff Salaries","Office Rent","Utilities","Marketing & Advertising","Travel & Transport","Office Supplies","Bank Charges","Miscellaneous"];
+const ATTENDANCE_STATUS = ["Present","Absent","Late","Half Day","Holiday","Leave"];
+const DEDUCTION_RULES = {Absent:1, Late:0.25, "Half Day":0.5, Present:0, Holiday:0, Leave:0};
+
+// ─── INVOICE MODULE (REBUILT) ─────────────────────────────────────────────────
+function Invoices({invoices,invoicesDB,leads,agents,currentUser,settings}) {
+  const [tab,setTab]=useState("all");
+  const [showAdd,setShowAdd]=useState(false);
+  const [showPayment,setShowPayment]=useState(null);
+  const [showReceipt,setShowReceipt]=useState(null);
+  const [sel,setSel]=useState(null);
+  const [search,setSearch]=useState("");
+
+  const EF={
+    type:"CLIENT",client_name:"",lead_id:"",country:"",
+    university_name:"",agent_id:"",
+    line_items:[{id:1,service:"",description:"",amount:""}],
+    currency:"PKR",foreign_currency:"GBP",foreign_amount:"",exchange_rate:"",
+    commission_pct:"",
+    invoice_date:tod(),due_date:"",notes:"",status:"Draft",
+    installments:[],payments:[],
+  };
+  const [form,setForm]=useState(EF);
+
+  // Payment form
+  const PEF={amount:"",date:tod(),method:"Cash",reference:"",notes:""};
+  const [payForm,setPayForm]=useState(PEF);
+
+  const filtered=useMemo(()=>{
+    let list=invoices;
+    if(tab!=="all") list=list.filter(i=>i.type===tab||(!i.type&&tab==="CLIENT"));
+    if(search.trim()) list=list.filter(i=>(i.client_name||"").toLowerCase().includes(search.toLowerCase())||(i.invoice_no||"").toLowerCase().includes(search.toLowerCase()));
+    return list.sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  },[invoices,tab,search]);
+
+  const getInvoiceNo=()=>{
+    const prefix=settings?.invoice_prefix||"BNB";
+    const year=new Date().getFullYear();
+    const count=invoices.length+1;
+    return `${prefix}-${year}-${String(count).padStart(4,"0")}`;
+  };
+
+  const lineTotal=(items)=>items.reduce((a,i)=>a+(parseFloat(i.amount)||0),0);
+  const totalPaid=(inv)=>(inv.payments||[]).reduce((a,p)=>a+(parseFloat(p.amount)||0),0);
+  const balance=(inv)=>lineTotal(inv.line_items||[])-totalPaid(inv);
+  const invStatus=(inv)=>{
+    const tot=lineTotal(inv.line_items||[]);
+    const paid=totalPaid(inv);
+    if(inv.status==="Draft")return "Draft";
+    if(paid<=0)return "Unpaid";
+    if(paid>=tot)return "Paid";
+    return "Partial";
+  };
+
+  const addLineItem=()=>setForm(f=>({...f,line_items:[...f.line_items,{id:Date.now(),service:"",description:"",amount:""}]}));
+  const removeLineItem=(id)=>setForm(f=>({...f,line_items:f.line_items.filter(i=>i.id!==id)}));
+  const updateLineItem=(id,field,val)=>setForm(f=>({...f,line_items:f.line_items.map(i=>i.id===id?{...i,[field]:val}:i)}));
+
+  const saveInvoice=async()=>{
+    if(!form.client_name)return alert("Client name required");
+    if(form.line_items.every(i=>!i.service))return alert("Add at least one service");
+    const inv={
+      ...form,
+      invoice_no:getInvoiceNo(),
+      amount:lineTotal(form.line_items),
+      paid:0,
+      status:"Draft",
+      created_by:currentUser.id,
+      line_items:form.line_items,
+      payments:[],
+    };
+    await invoicesDB.insert(inv);
+    setShowAdd(false);setForm(EF);
+  };
+
+  const addPayment=async()=>{
+    if(!payForm.amount||!showPayment)return;
+    const inv=showPayment;
+    const payment={id:Date.now(),...payForm,amount:parseFloat(payForm.amount),by:currentUser.name};
+    const payments=[...(inv.payments||[]),payment];
+    const totalPaidAmt=payments.reduce((a,p)=>a+p.amount,0);
+    const tot=lineTotal(inv.line_items||[]);
+    const status=totalPaidAmt>=tot?"Paid":totalPaidAmt>0?"Partial":"Unpaid";
+    await invoicesDB.update(inv.id,{payments,paid:totalPaidAmt,status});
+    setSel(p=>p?{...p,payments,paid:totalPaidAmt,status}:p);
+    setShowPayment(null);setPayForm(PEF);
+  };
+
+  const printReceipt=(inv,payment)=>{
+    const co=settings?.company_name||"Border and Bridges Pvt. Ltd.";
+    const addr=settings?.address||"Lahore, Pakistan";
+    const phone=settings?.phone||"";
+    const prefix=settings?.invoice_prefix||"BNB";
+    const html=`<!DOCTYPE html><html><head><title>Receipt</title>
+    <style>body{font-family:Arial;max-width:600px;margin:40px auto;padding:20px}
+    .header{text-align:center;border-bottom:2px solid #2d3a8c;padding-bottom:16px;margin-bottom:20px}
+    .company{font-size:22px;font-weight:900;color:#2d3a8c}
+    .sub{font-size:12px;color:#666;margin:2px 0}
+    .title{font-size:18px;font-weight:700;text-align:center;margin:20px 0;color:#059669}
+    .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+    .label{color:#666;font-size:13px}.value{font-weight:700;font-size:13px}
+    .amount{font-size:24px;font-weight:900;color:#2d3a8c;text-align:center;margin:20px 0;padding:16px;background:#eef0fb;border-radius:8px}
+    .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;border-top:1px solid #eee;padding-top:12px}
+    </style></head><body>
+    <div class="header">
+      <div class="company">${co}</div>
+      <div class="sub">${addr}</div>
+      <div class="sub">${phone}</div>
+    </div>
+    <div class="title">✓ PAYMENT RECEIPT</div>
+    <div class="row"><span class="label">Receipt No</span><span class="value">${prefix}-RCP-${Date.now().toString().slice(-6)}</span></div>
+    <div class="row"><span class="label">Invoice No</span><span class="value">${inv.invoice_no||"—"}</span></div>
+    <div class="row"><span class="label">Client</span><span class="value">${inv.client_name}</span></div>
+    <div class="row"><span class="label">Payment Date</span><span class="value">${payment.date}</span></div>
+    <div class="row"><span class="label">Payment Method</span><span class="value">${payment.method}</span></div>
+    ${payment.reference?`<div class="row"><span class="label">Reference</span><span class="value">${payment.reference}</span></div>`:""}
+    <div class="amount">PKR ${parseFloat(payment.amount).toLocaleString()}</div>
+    <div class="row"><span class="label">Total Invoice</span><span class="value">PKR ${lineTotal(inv.line_items||[]).toLocaleString()}</span></div>
+    <div class="row"><span class="label">Total Paid</span><span class="value">PKR ${(totalPaid(inv)).toLocaleString()}</span></div>
+    <div class="row"><span class="label">Balance Remaining</span><span class="value">PKR ${Math.max(0,balance(inv)).toLocaleString()}</span></div>
+    <div class="footer">${settings?.invoice_terms||"Thank you for choosing "+co}</div>
+    </body></html>`;
+    const w=window.open("","_blank");w.document.write(html);w.document.close();w.print();
+  };
+
+  const statusColor=(s)=>({Draft:["#5c6bc0","#eef0fb"],Unpaid:["#dc2626","#fee2e2"],Partial:["#7c5100","#fef3c7"],Paid:["#065f46","#d1fae5"]}[s]||["#37474f","#f3f4f9"]);
+
+  if(currentUser.role!==ROLES.CEO&&currentUser.role!==ROLES.ACCOUNTS)
+    return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+
+  // Summary stats
+  const totalBilled=invoices.filter(i=>i.status!=="Draft").reduce((a,i)=>a+lineTotal(i.line_items||[]),0);
+  const totalCollected=invoices.reduce((a,i)=>a+totalPaid(i),0);
+  const totalOutstanding=totalBilled-totalCollected;
+  const totalCommission=invoices.filter(i=>i.type==="COMMISSION").reduce((a,i)=>a+lineTotal(i.line_items||[]),0);
+  const totalAgentPayable=invoices.filter(i=>i.type==="AGENT_PAYABLE").reduce((a,i)=>a+lineTotal(i.line_items||[]),0);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Invoices & Payments</h2><p style={S.sub}>{invoices.length} invoices · {invoices.filter(i=>i.status==="Draft").length} drafts</p></div>
+        {currentUser.role===ROLES.CEO&&<button onClick={()=>setShowAdd(true)} style={S.btn("#dc2626")}>+ New Invoice</button>}
+      </div>
+
+      {/* Stats */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:20}}>
+        <Stat label="Total Billed" value={fmt(totalBilled)} color={B.primary} icon="🧾"/>
+        <Stat label="Collected" value={fmt(totalCollected)} color={B.success} icon="💰"/>
+        <Stat label="Outstanding" value={fmt(totalOutstanding)} color={B.danger} icon="⏳"/>
+        <Stat label="Uni Commission" value={fmt(totalCommission)} color={B.secondary} icon="🎓"/>
+        <Stat label="Agent Payable" value={fmt(totalAgentPayable)} color="#7c3aed" icon="🤝"/>
+      </div>
+
+      {/* Tabs + Search */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",gap:6}}>
+          {[["all","All"],["CLIENT","Client"],["COMMISSION","Uni Commission"],["AGENT_PAYABLE","Agent Payable"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid",borderColor:tab===k?B.primary:"#c5cae9",background:tab===k?B.light:"#fff",color:tab===k?B.primary:"#5c6bc0",fontSize:12,fontWeight:700,cursor:"pointer"}}>{l} ({k==="all"?invoices.length:invoices.filter(i=>(i.type||"CLIENT")===k).length})</button>
+          ))}
+        </div>
+        <input style={{...S.inp,width:200,margin:0}} placeholder="🔍 Search…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      </div>
+
+      {/* Invoice table */}
+      <div style={{...S.card,padding:0,overflow:"hidden"}}>
+        <div style={{overflowX:"auto",maxHeight:"calc(100vh - 340px)",overflowY:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+            <thead><tr>{["Invoice #","Date","Client","Type","Total","Paid","Balance","Status",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {filtered.map(inv=>{
+                const tot=lineTotal(inv.line_items||[]);
+                const paid=totalPaid(inv);
+                const bal=tot-paid;
+                const st=invStatus(inv);
+                const [sc,sb]=statusColor(st);
+                return (
+                  <tr key={inv.id}>
+                    <td style={{...S.td,fontWeight:700,color:B.primary}}>{inv.invoice_no||"—"}</td>
+                    <td style={{...S.td,fontSize:11}}>{inv.invoice_date||"—"}</td>
+                    <td style={S.td}><div style={{fontWeight:700}}>{inv.client_name}</div><div style={{fontSize:10,color:"#9fa8da"}}>{inv.country||""}</div></td>
+                    <td style={S.td}><Pill text={INVOICE_TYPES[inv.type||"CLIENT"]||"Client"} color="#3949ab" bg="#eef0fb"/></td>
+                    <td style={{...S.td,fontWeight:700}}>{fmt(tot)}</td>
+                    <td style={{...S.td,color:B.success,fontWeight:700}}>{fmt(paid)}</td>
+                    <td style={{...S.td,color:bal>0?"#dc2626":B.success,fontWeight:700}}>{fmt(bal)}</td>
+                    <td style={S.td}><Pill text={st} color={sc} bg={sb}/></td>
+                    <td style={S.td}>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={()=>setSel({...inv})} style={{...S.ghost,fontSize:11,padding:"4px 8px"}}>Open</button>
+                        {st!=="Paid"&&st!=="Draft"&&<button onClick={()=>{setSel({...inv});setShowPayment({...inv});}} style={{...S.btn(B.success),fontSize:11,padding:"4px 8px"}}>+ Pay</button>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No invoices yet.</div>}
+        </div>
+      </div>
+
+      {/* Invoice Detail Modal */}
+      {sel&&(
+        <Modal title={`${sel.invoice_no||"Draft"} — ${sel.client_name}`} onClose={()=>setSel(null)} w={700}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16,padding:14,background:"#f8f9ff",borderRadius:10}}>
+            {[["Type",INVOICE_TYPES[sel.type||"CLIENT"]],["Date",sel.invoice_date],["Status",invStatus(sel)],["Country",sel.country||"—"],["Currency",sel.currency||"PKR"],["Due Date",sel.due_date||"—"]].map(([k,v])=>(
+              <div key={k}><div style={S.lbl}>{k}</div><div style={{fontSize:13,fontWeight:700,color:B.dark}}>{v}</div></div>
+            ))}
+          </div>
+
+          {/* Line Items */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:8}}>Services</div>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Service","Description","Amount (PKR)"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(sel.line_items||[]).map(item=>(
+                  <tr key={item.id}>
+                    <td style={S.td}>{item.service}</td>
+                    <td style={{...S.td,fontSize:12,color:"#5c6bc0"}}>{item.description||"—"}</td>
+                    <td style={{...S.td,fontWeight:700}}>{fmt(item.amount)}</td>
+                  </tr>
+                ))}
+                <tr style={{background:"#f8f9ff"}}>
+                  <td style={{...S.td,fontWeight:800,color:B.dark}} colSpan={2}>Total</td>
+                  <td style={{...S.td,fontWeight:900,color:B.primary,fontSize:15}}>{fmt(lineTotal(sel.line_items||[]))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* University/Agent specific info */}
+          {sel.type==="COMMISSION"&&(
+            <div style={{background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.secondary,marginBottom:8}}>University Commission Details</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={S.lbl}>University</div><div style={{fontSize:13,fontWeight:700}}>{sel.university_name||"—"}</div></div>
+                <div><div style={S.lbl}>Foreign Amount</div><div style={{fontSize:13,fontWeight:700}}>{sel.foreign_currency} {sel.foreign_amount||"—"}</div></div>
+                <div><div style={S.lbl}>Exchange Rate</div><div style={{fontSize:13,fontWeight:700}}>{sel.exchange_rate||"—"}</div></div>
+                <div><div style={S.lbl}>PKR Equivalent</div><div style={{fontSize:13,fontWeight:700,color:B.success}}>{fmt((sel.foreign_amount||0)*(sel.exchange_rate||0))}</div></div>
+              </div>
+            </div>
+          )}
+          {sel.type==="AGENT_PAYABLE"&&(
+            <div style={{background:"#fdf4ff",borderRadius:10,padding:14,marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:8}}>Agent Payable Details</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={S.lbl}>Agent</div><div style={{fontSize:13,fontWeight:700}}>{(agents||[]).find(a=>a.id===sel.agent_id)?.name||sel.agent_name||"—"}</div></div>
+                <div><div style={S.lbl}>Commission %</div><div style={{fontSize:13,fontWeight:700}}>{sel.commission_pct||"—"}%</div></div>
+              </div>
+            </div>
+          )}
+
+          {/* Payment History */}
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.dark}}>Payment History</div>
+              {invStatus(sel)!=="Paid"&&invStatus(sel)!=="Draft"&&<button onClick={()=>setShowPayment({...sel})} style={{...S.btn(B.success),fontSize:11,padding:"5px 12px"}}>+ Add Payment</button>}
+            </div>
+            {(sel.payments||[]).length===0&&<div style={{fontSize:12,color:"#9fa8da",textAlign:"center",padding:12,background:"#f8f9ff",borderRadius:8}}>No payments recorded yet.</div>}
+            {(sel.payments||[]).map((p,i)=>(
+              <div key={p.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"#f8f9ff",borderRadius:8,marginBottom:6}}>
+                <div>
+                  <span style={{fontWeight:700,color:B.success,fontSize:13}}>{fmt(p.amount)}</span>
+                  <span style={{fontSize:11,color:"#5c6bc0",marginLeft:8}}>{p.method}</span>
+                  {p.reference&&<span style={{fontSize:11,color:"#9fa8da",marginLeft:8}}>Ref: {p.reference}</span>}
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontSize:11,color:"#9fa8da"}}>{p.date} · {p.by}</span>
+                  <button onClick={()=>printReceipt(sel,p)} style={{...S.ghost,fontSize:10,padding:"3px 8px"}}>🖨️ Receipt</button>
+                </div>
+              </div>
+            ))}
+            {(sel.payments||[]).length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:10,padding:12,background:B.light,borderRadius:8}}>
+                {[["Total",lineTotal(sel.line_items||[]),"#37474f"],["Paid",totalPaid(sel),B.success],["Balance",Math.max(0,balance(sel)),"#dc2626"]].map(([l,v,c])=>(
+                  <div key={l} style={{textAlign:"center"}}><div style={{fontSize:10,color:"#9fa8da",fontWeight:700,textTransform:"uppercase"}}>{l}</div><div style={{fontSize:15,fontWeight:900,color:c}}>{fmt(v)}</div></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {sel.notes&&<div style={{background:"#f8f9ff",borderRadius:8,padding:12,fontSize:12,color:"#37474f"}}><strong>Notes:</strong> {sel.notes}</div>}
+        </Modal>
+      )}
+
+      {/* Add Payment Modal */}
+      {showPayment&&(
+        <Modal title={`Add Payment — ${showPayment.client_name}`} onClose={()=>setShowPayment(null)} w={480}>
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><div style={S.lbl}>Invoice Total</div><div style={{fontSize:16,fontWeight:900,color:B.primary}}>{fmt(lineTotal(showPayment.line_items||[]))}</div></div>
+            <div><div style={S.lbl}>Balance Due</div><div style={{fontSize:16,fontWeight:900,color:"#dc2626"}}>{fmt(Math.max(0,balance(showPayment)))}</div></div>
+          </div>
+          <R2>
+            <Fld label="Amount (PKR)"><input type="number" style={S.inp} value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="Enter amount received"/></Fld>
+            <Fld label="Payment Date"><input type="date" style={S.inp} value={payForm.date} onChange={e=>setPayForm({...payForm,date:e.target.value})}/></Fld>
+          </R2>
+          <Fld label="Payment Method">
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {PAYMENT_METHODS.map(m=><button key={m} onClick={()=>setPayForm({...payForm,method:m})} style={{padding:"6px 12px",borderRadius:8,border:`2px solid ${payForm.method===m?B.success:"#c5cae9"}`,background:payForm.method===m?"#d1fae5":"#fff",color:payForm.method===m?"#065f46":"#5c6bc0",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m}</button>)}
+            </div>
+          </Fld>
+          <R2>
+            <Fld label="Reference / Cheque No"><input style={S.inp} value={payForm.reference} onChange={e=>setPayForm({...payForm,reference:e.target.value})} placeholder="Optional"/></Fld>
+            <Fld label="Notes"><input style={S.inp} value={payForm.notes} onChange={e=>setPayForm({...payForm,notes:e.target.value})} placeholder="Optional"/></Fld>
+          </R2>
+          <button onClick={addPayment} style={{...S.btn(B.success),width:"100%",justifyContent:"center",padding:12}}>✓ Record Payment</button>
+        </Modal>
+      )}
+
+      {/* New Invoice Modal */}
+      {showAdd&&(
+        <Modal title="New Invoice" onClose={()=>setShowAdd(false)} w={720}>
+          {/* Invoice Type */}
+          <div style={{marginBottom:16}}>
+            <div style={S.lbl}>Invoice Type</div>
+            <div style={{display:"flex",gap:8}}>
+              {Object.entries(INVOICE_TYPES).map(([k,l])=>(
+                <button key={k} onClick={()=>setForm({...form,type:k})} style={{padding:"8px 16px",borderRadius:8,border:`2px solid ${form.type===k?B.primary:"#c5cae9"}`,background:form.type===k?B.light:"#fff",color:form.type===k?B.primary:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <R2>
+            <Fld label="Client Name">
+              <select style={S.sel} value={form.lead_id} onChange={e=>{
+                const lead=leads.find(l=>l.id===e.target.value);
+                setForm({...form,lead_id:e.target.value,client_name:lead?.name||"",country:lead?.country||""});
+              }}>
+                <option value="">— Select Client —</option>
+                {leads.filter(l=>l.list==="ACL"&&!l.lost).map(l=><option key={l.id} value={l.id}>{l.name} ({l.country})</option>)}
+              </select>
+            </Fld>
+            <Fld label="Or Type Name"><input style={S.inp} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Client name"/></Fld>
+          </R2>
+
+          {form.type==="COMMISSION"&&(
+            <div style={{background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.secondary,marginBottom:10}}>University Commission Details</div>
+              <R2>
+                <Fld label="University Name"><input style={S.inp} value={form.university_name} onChange={e=>setForm({...form,university_name:e.target.value})} placeholder="e.g. University of Birmingham"/></Fld>
+                <Fld label="Foreign Currency">
+                  <select style={S.sel} value={form.foreign_currency} onChange={e=>setForm({...form,foreign_currency:e.target.value})}>
+                    {FOREIGN_CURRENCIES.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </Fld>
+              </R2>
+              <R2>
+                <Fld label={`Amount in ${form.foreign_currency}`}><input type="number" style={S.inp} value={form.foreign_amount} onChange={e=>setForm({...form,foreign_amount:e.target.value})} placeholder="e.g. 500"/></Fld>
+                <Fld label="Exchange Rate (PKR)"><input type="number" style={S.inp} value={form.exchange_rate} onChange={e=>setForm({...form,exchange_rate:e.target.value})} placeholder="e.g. 350"/></Fld>
+              </R2>
+              {form.foreign_amount&&form.exchange_rate&&<Alert type="info" msg={`PKR Equivalent: ${fmt(form.foreign_amount*form.exchange_rate)}`}/>}
+            </div>
+          )}
+
+          {form.type==="AGENT_PAYABLE"&&(
+            <div style={{background:"#fdf4ff",borderRadius:10,padding:14,marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:10}}>Agent Payable Details</div>
+              <R2>
+                <Fld label="Agent">
+                  <select style={S.sel} value={form.agent_id} onChange={e=>{
+                    const ag=(agents||[]).find(a=>a.id===e.target.value);
+                    setForm({...form,agent_id:e.target.value,commission_pct:ag?.commission_pct||"",agent_name:ag?.name||""});
+                  }}>
+                    <option value="">— Select Agent —</option>
+                    {(agents||[]).map(a=><option key={a.id} value={a.id}>{a.name} ({a.commission_pct||"?"}%)</option>)}
+                  </select>
+                </Fld>
+                <Fld label="Commission %"><input type="number" style={S.inp} value={form.commission_pct} onChange={e=>setForm({...form,commission_pct:e.target.value})} placeholder="e.g. 70"/></Fld>
+              </R2>
+            </div>
+          )}
+
+          {/* Line Items */}
+          <div style={{marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.dark}}>Services / Line Items</div>
+              <button onClick={addLineItem} style={{...S.ghost,fontSize:11,padding:"4px 10px"}}>+ Add Line</button>
+            </div>
+            {form.line_items.map((item,idx)=>(
+              <div key={item.id} style={{display:"grid",gridTemplateColumns:"2fr 2fr 1fr auto",gap:8,marginBottom:8,alignItems:"center"}}>
+                <select style={S.sel} value={item.service} onChange={e=>updateLineItem(item.id,"service",e.target.value)}>
+                  <option value="">— Select Service —</option>
+                  {Object.entries(FINANCE_SERVICES).map(([group,services])=>(
+                    <optgroup key={group} label={group}>
+                      {services.map(s=><option key={s} value={s}>{s}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                <input style={S.inp} value={item.description} onChange={e=>updateLineItem(item.id,"description",e.target.value)} placeholder="Description (optional)"/>
+                <input type="number" style={S.inp} value={item.amount} onChange={e=>updateLineItem(item.id,"amount",e.target.value)} placeholder="PKR"/>
+                {form.line_items.length>1&&<button onClick={()=>removeLineItem(item.id)} style={{background:"#fee2e2",border:"none",borderRadius:6,width:28,height:28,color:"#dc2626",cursor:"pointer",fontSize:16}}>×</button>}
+              </div>
+            ))}
+            <div style={{textAlign:"right",fontSize:15,fontWeight:900,color:B.primary,marginTop:8}}>Total: {fmt(lineTotal(form.line_items))}</div>
+          </div>
+
+          <R2>
+            <Fld label="Invoice Date"><input type="date" style={S.inp} value={form.invoice_date} onChange={e=>setForm({...form,invoice_date:e.target.value})}/></Fld>
+            <Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld>
+          </R2>
+          <Fld label="Notes"><textarea style={{...S.inp,minHeight:60,resize:"vertical"}} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Any notes…"/></Fld>
+          <button onClick={saveInvoice} style={{...S.btn(B.primary),width:"100%",justifyContent:"center",padding:12}}>Save Invoice as Draft</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── AGENTS MODULE ────────────────────────────────────────────────────────────
+function AgentsModule({agents,agentsDB,invoices,leads,currentUser}) {
+  const [showAdd,setShowAdd]=useState(false);
+  const [sel,setSel]=useState(null);
+  const EF={name:"",company:"",contact:"",city:"",branch:"Lahore (HQ)",commission_pct:"",bank_name:"",bank_account:"",bank_title:"",notes:""};
+  const [form,setForm]=useState(EF);
+
+  const saveAgent=async()=>{
+    if(!form.name)return;
+    if(sel) await agentsDB.update(sel.id,form);
+    else await agentsDB.insert(form);
+    setShowAdd(false);setSel(null);setForm(EF);
+  };
+
+  const getAgentStats=(agent)=>{
+    const agentLeads=leads.filter(l=>l.agent_id===agent.id||l.source_agent===agent.id);
+    const agentInvoices=invoices.filter(i=>i.agent_id===agent.id&&i.type==="AGENT_PAYABLE");
+    const totalPayable=agentInvoices.reduce((a,i)=>a+(i.amount||0),0);
+    const totalPaid=agentInvoices.reduce((a,i)=>a+(i.paid||0),0);
+    return {cases:agentLeads.length,totalPayable,totalPaid,outstanding:totalPayable-totalPaid};
+  };
+
+  if(currentUser.role!==ROLES.CEO&&currentUser.role!==ROLES.ACCOUNTS)
+    return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Agents (B2B Partners)</h2><p style={S.sub}>{agents.length} agents registered</p></div>
+        {currentUser.role===ROLES.CEO&&<button onClick={()=>{setForm(EF);setShowAdd(true);}} style={S.btn("#7c3aed")}>+ Add Agent</button>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
+        {agents.map(agent=>{
+          const stats=getAgentStats(agent);
+          return (
+            <div key={agent.id} style={{...S.card,cursor:"pointer"}} onClick={()=>{setSel(agent);setForm(agent);setShowAdd(true);}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800,color:B.dark}}>{agent.name}</div>
+                  <div style={{fontSize:12,color:"#5c6bc0"}}>{agent.company||"—"} · {agent.city||"—"}</div>
+                </div>
+                <Pill text={`${agent.commission_pct||"?"}% Commission`} color="#7c3aed" bg="#f3e8ff"/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+                {[["Cases",stats.cases,"#3949ab"],["Payable",fmt(stats.totalPayable),"#dc2626"],["Paid",fmt(stats.totalPaid),"#059669"]].map(([l,v,c])=>(
+                  <div key={l} style={{textAlign:"center",background:"#f8f9ff",borderRadius:8,padding:"8px 4px"}}>
+                    <div style={{fontSize:10,color:"#9fa8da",fontWeight:700,textTransform:"uppercase"}}>{l}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:"#9fa8da"}}>📞 {agent.contact||"—"} · 🏦 {agent.bank_name||"—"}</div>
+            </div>
+          );
+        })}
+        {agents.length===0&&<div style={{...S.card,textAlign:"center",color:"#9fa8da",padding:48}}>No agents yet. Add your first B2B partner.</div>}
+      </div>
+
+      {showAdd&&(
+        <Modal title={sel?"Edit Agent":"Add New Agent"} onClose={()=>{setShowAdd(false);setSel(null);setForm(EF);}} w={600}>
+          <R2>
+            <Fld label="Agent Name *"><input style={S.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Full name"/></Fld>
+            <Fld label="Company Name"><input style={S.inp} value={form.company} onChange={e=>setForm({...form,company:e.target.value})} placeholder="Company/Agency name"/></Fld>
+          </R2>
+          <R2>
+            <Fld label="Contact Number"><input style={S.inp} value={form.contact} onChange={e=>setForm({...form,contact:e.target.value})} placeholder="+92 300…"/></Fld>
+            <Fld label="City"><input style={S.inp} value={form.city} onChange={e=>setForm({...form,city:e.target.value})} placeholder="City"/></Fld>
+          </R2>
+          <Fld label="Commission % (of what you receive)">
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input type="number" style={{...S.inp,width:100}} value={form.commission_pct} onChange={e=>setForm({...form,commission_pct:e.target.value})} placeholder="e.g. 70"/>
+              <span style={{fontSize:13,color:"#5c6bc0"}}>% of your fee goes to this agent</span>
+            </div>
+          </Fld>
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Bank Details (for commission payments)</div>
+            <R2>
+              <Fld label="Bank Name"><input style={S.inp} value={form.bank_name} onChange={e=>setForm({...form,bank_name:e.target.value})} placeholder="e.g. HBL, MCB, UBL…"/></Fld>
+              <Fld label="Account Title"><input style={S.inp} value={form.bank_title} onChange={e=>setForm({...form,bank_title:e.target.value})} placeholder="Account holder name"/></Fld>
+            </R2>
+            <Fld label="Account Number"><input style={S.inp} value={form.bank_account} onChange={e=>setForm({...form,bank_account:e.target.value})} placeholder="Account number"/></Fld>
+          </div>
+          <Fld label="Notes"><textarea style={{...S.inp,minHeight:60,resize:"vertical"}} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></Fld>
+          <button onClick={saveAgent} style={{...S.btn(B.primary),width:"100%",justifyContent:"center",padding:12}}>{sel?"Update Agent":"Save Agent"}</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── EXPENSES MODULE ──────────────────────────────────────────────────────────
+function Expenses({currentUser,settings}) {
+  const expDB=useTable("expenses",{orderBy:"date",asc:false});
+  const [showAdd,setShowAdd]=useState(false);
+  const [filterMonth,setFilterMonth]=useState(tod().slice(0,7));
+  const [filterBranch,setFilterBranch]=useState("All");
+  const EF={date:tod(),category:"",description:"",amount:"",branch:currentUser.branch||"Lahore (HQ)",paid_by:"",receipt_no:""};
+  const [form,setForm]=useState(EF);
+
+  const cats=settings?.expense_categories?JSON.parse(settings.expense_categories):EXPENSE_CATEGORIES_DEFAULT;
+  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+
+  const filtered=expDB.data.filter(e=>{
+    if(filterMonth&&!e.date?.startsWith(filterMonth))return false;
+    if(filterBranch!=="All"&&e.branch!==filterBranch)return false;
+    return true;
+  });
+
+  const total=filtered.reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+
+  const save=async()=>{
+    if(!form.category||!form.amount)return;
+    await expDB.insert({...form,amount:parseFloat(form.amount),created_by:currentUser.id,created_by_name:currentUser.name});
+    setShowAdd(false);setForm(EF);
+  };
+
+  // Group by category
+  const byCat=filtered.reduce((acc,e)=>{acc[e.category]=(acc[e.category]||0)+(parseFloat(e.amount)||0);return acc;},{});
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Expense Tracker</h2><p style={S.sub}>Total this period: {fmt(total)}</p></div>
+        {canEdit&&<button onClick={()=>setShowAdd(true)} style={S.btn(B.warn)}>+ Add Expense</button>}
+      </div>
+
+      {/* Filters */}
+      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+        <input type="month" style={{...S.inp,width:160,margin:0}} value={filterMonth} onChange={e=>setFilterMonth(e.target.value)}/>
+        <select style={{...S.sel,width:160}} value={filterBranch} onChange={e=>setFilterBranch(e.target.value)}>
+          <option>All</option>{BRANCHES_DEFAULT.map(b=><option key={b}>{b}</option>)}
+        </select>
+      </div>
+
+      {/* Category breakdown */}
+      {Object.keys(byCat).length>0&&(
+        <div style={{...S.card,marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Breakdown by Category</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>(
+              <div key={cat} style={{padding:"6px 12px",background:"#fff3cd",borderRadius:8,fontSize:12}}>
+                <span style={{fontWeight:700,color:"#7c5100"}}>{cat}</span>
+                <span style={{color:"#92400e",marginLeft:6}}>{fmt(amt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Date","Category","Description","Branch","Amount","Paid By","Receipt #",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {filtered.map(e=>(
+              <tr key={e.id}>
+                <td style={{...S.td,fontSize:11}}>{e.date}</td>
+                <td style={S.td}><Pill text={e.category} color="#7c5100" bg="#fff3cd"/></td>
+                <td style={S.td}>{e.description||"—"}</td>
+                <td style={{...S.td,fontSize:11}}>{e.branch}</td>
+                <td style={{...S.td,fontWeight:700,color:B.danger}}>{fmt(e.amount)}</td>
+                <td style={{...S.td,fontSize:11}}>{e.paid_by||"—"}</td>
+                <td style={{...S.td,fontSize:11}}>{e.receipt_no||"—"}</td>
+                <td style={S.td}>{canEdit&&<button onClick={async()=>{if(window.confirm("Delete this expense?"))await expDB.remove(e.id);}} style={{...S.ghost,fontSize:10,padding:"3px 8px",color:"#dc2626",borderColor:"#dc2626"}}>Delete</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No expenses for this period.</div>}
+        {filtered.length>0&&<div style={{padding:"12px 14px",background:"#fff3cd",fontWeight:900,color:"#7c5100",fontSize:14,textAlign:"right"}}>Total: {fmt(total)}</div>}
+      </div>
+
+      {showAdd&&(
+        <Modal title="Add Expense" onClose={()=>setShowAdd(false)} w={520}>
+          <R2>
+            <Fld label="Date"><input type="date" style={S.inp} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></Fld>
+            <Fld label="Category">
+              <select style={S.sel} value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
+                <option value="">— Select —</option>
+                {cats.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </Fld>
+          </R2>
+          <Fld label="Description"><input style={S.inp} value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="What was it for?"/></Fld>
+          <R2>
+            <Fld label="Amount (PKR)"><input type="number" style={S.inp} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></Fld>
+            <Fld label="Branch"><select style={S.sel} value={form.branch} onChange={e=>setForm({...form,branch:e.target.value})}>{BRANCHES_DEFAULT.map(b=><option key={b}>{b}</option>)}</select></Fld>
+          </R2>
+          <R2>
+            <Fld label="Paid By"><input style={S.inp} value={form.paid_by} onChange={e=>setForm({...form,paid_by:e.target.value})} placeholder="Name"/></Fld>
+            <Fld label="Receipt #"><input style={S.inp} value={form.receipt_no} onChange={e=>setForm({...form,receipt_no:e.target.value})} placeholder="Optional"/></Fld>
+          </R2>
+          <button onClick={save} style={{...S.btn(B.warn),width:"100%",justifyContent:"center",padding:12}}>Save Expense</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── PETTY CASH MODULE ────────────────────────────────────────────────────────
+function PettyCash({currentUser}) {
+  const pcDB=useTable("petty_cash",{orderBy:"date",asc:false});
+  const [showAdd,setShowAdd]=useState(false);
+  const [filterMonth,setFilterMonth]=useState(tod().slice(0,7));
+  const EF={date:tod(),type:"Out",description:"",amount:"",received_from:"",paid_to:"",notes:""};
+  const [form,setForm]=useState(EF);
+
+  const canEdit=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+  const filtered=pcDB.data.filter(e=>!filterMonth||e.date?.startsWith(filterMonth));
+
+  // Calculate running balance
+  const withBalance=[];
+  let runBal=0;
+  [...filtered].reverse().forEach(e=>{
+    if(e.type==="In") runBal+=parseFloat(e.amount)||0;
+    else runBal-=parseFloat(e.amount)||0;
+    withBalance.push({...e,running_balance:runBal});
+  });
+  withBalance.reverse();
+
+  const totalIn=filtered.filter(e=>e.type==="In").reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  const totalOut=filtered.filter(e=>e.type==="Out").reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  const closingBal=totalIn-totalOut;
+
+  const save=async()=>{
+    if(!form.description||!form.amount)return;
+    await pcDB.insert({...form,amount:parseFloat(form.amount),created_by:currentUser.id,created_by_name:currentUser.name});
+    setShowAdd(false);setForm(EF);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Petty Cash Book</h2><p style={S.sub}>Closing Balance: {fmt(closingBal)}</p></div>
+        {canEdit&&<button onClick={()=>setShowAdd(true)} style={S.btn(B.secondary)}>+ Entry</button>}
+      </div>
+
+      {/* Summary */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+        <Stat label="Total In" value={fmt(totalIn)} color={B.success} icon="📥"/>
+        <Stat label="Total Out" value={fmt(totalOut)} color={B.danger} icon="📤"/>
+        <Stat label="Closing Balance" value={fmt(closingBal)} color={closingBal>=0?B.primary:B.danger} icon="💰"/>
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <input type="month" style={{...S.inp,width:160,margin:0}} value={filterMonth} onChange={e=>setFilterMonth(e.target.value)}/>
+      </div>
+
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Date","Type","Description","Received From / Paid To","Amount","Balance",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {withBalance.map(e=>(
+              <tr key={e.id} style={{background:e.type==="In"?"#f0fdf4":"#fff5f5"}}>
+                <td style={{...S.td,fontSize:11}}>{e.date}</td>
+                <td style={S.td}><Pill text={e.type} color={e.type==="In"?B.success:B.danger} bg={e.type==="In"?"#d1fae5":"#fee2e2"}/></td>
+                <td style={S.td}>{e.description}</td>
+                <td style={{...S.td,fontSize:11}}>{e.type==="In"?e.received_from:e.paid_to||"—"}</td>
+                <td style={{...S.td,fontWeight:700,color:e.type==="In"?B.success:B.danger}}>{e.type==="In"?"+":"-"}{fmt(e.amount)}</td>
+                <td style={{...S.td,fontWeight:700,color:e.running_balance>=0?B.primary:B.danger}}>{fmt(e.running_balance)}</td>
+                <td style={S.td}>{canEdit&&<button onClick={async()=>{if(window.confirm("Delete?"))await pcDB.remove(e.id);}} style={{...S.ghost,fontSize:10,padding:"3px 8px",color:"#dc2626",borderColor:"#dc2626"}}>Del</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No petty cash entries for this period.</div>}
+      </div>
+
+      {showAdd&&(
+        <Modal title="New Petty Cash Entry" onClose={()=>setShowAdd(false)} w={480}>
+          <div style={{display:"flex",gap:10,marginBottom:14}}>
+            {["In","Out"].map(t=><button key={t} onClick={()=>setForm({...form,type:t})} style={{flex:1,padding:12,borderRadius:10,border:`2px solid ${form.type===t?(t==="In"?B.success:B.danger):"#c5cae9"}`,background:form.type===t?(t==="In"?"#d1fae5":"#fee2e2"):"#fff",color:form.type===t?(t==="In"?"#065f46":"#9b1c1c"):"#5c6bc0",fontSize:15,fontWeight:800,cursor:"pointer"}}>{t==="In"?"📥 Cash In":"📤 Cash Out"}</button>)}
+          </div>
+          <R2>
+            <Fld label="Date"><input type="date" style={S.inp} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></Fld>
+            <Fld label="Amount (PKR)"><input type="number" style={S.inp} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></Fld>
+          </R2>
+          <Fld label="Description"><input style={S.inp} value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="What is this for?"/></Fld>
+          <Fld label={form.type==="In"?"Received From":"Paid To"}>
+            <input style={S.inp} value={form.type==="In"?form.received_from:form.paid_to} onChange={e=>setForm(form.type==="In"?{...form,received_from:e.target.value}:{...form,paid_to:e.target.value})} placeholder="Name"/>
+          </Fld>
+          <button onClick={save} style={{...S.btn(form.type==="In"?B.success:B.danger),width:"100%",justifyContent:"center",padding:12}}>Save Entry</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ATTENDANCE MODULE ────────────────────────────────────────────────────────
+function Attendance({users,currentUser}) {
+  const attDB=useTable("attendance",{orderBy:"date",asc:false});
+  const [selDate,setSelDate]=useState(tod());
+  const [filterBranch,setFilterBranch]=useState(currentUser.branch||"Lahore (HQ)");
+
+  const canMark=currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER;
+  const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO&&(!filterBranch||u.branch===filterBranch));
+  const todayAtt=attDB.data.filter(a=>a.date===selDate&&(!filterBranch||a.branch===filterBranch));
+
+  const markAtt=async(userId,userName,status)=>{
+    const existing=todayAtt.find(a=>a.user_id===userId);
+    if(existing) await attDB.update(existing.id,{status,marked_by:currentUser.name});
+    else await attDB.insert({user_id:userId,user_name:userName,date:selDate,status,branch:filterBranch,marked_by:currentUser.name});
+  };
+
+  const getStatus=(userId)=>todayAtt.find(a=>a.user_id===userId)?.status||null;
+  const statusColors={Present:["#065f46","#d1fae5"],Absent:["#9b1c1c","#fee2e2"],Late:["#7c5100","#fef3c7"],"Half Day":["#5b21b6","#ede9fe"],Holiday:["#1e40af","#dbeafe"],Leave:["#374151","#f3f4f9"]};
+
+  // Monthly summary
+  const [viewMonth,setViewMonth]=useState(tod().slice(0,7));
+  const monthAtt=attDB.data.filter(a=>a.date?.startsWith(viewMonth)&&(!filterBranch||a.branch===filterBranch));
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Attendance</h2><p style={S.sub}>Daily attendance · 10AM–6PM</p></div>
+
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <input type="date" style={{...S.inp,width:160,margin:0}} value={selDate} onChange={e=>setSelDate(e.target.value)}/>
+        <select style={{...S.sel,width:180}} value={filterBranch} onChange={e=>setFilterBranch(e.target.value)}>
+          {BRANCHES_DEFAULT.map(b=><option key={b}>{b}</option>)}
+        </select>
+      </div>
+
+      {/* Mark Attendance */}
+      <div style={{...S.card,marginBottom:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>
+          Mark Attendance — {selDate} {selDate===tod()&&<span style={{background:"#d1fae5",color:"#065f46",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,marginLeft:8}}>Today</span>}
+        </div>
+        {staff.length===0&&<div style={{color:"#9fa8da",textAlign:"center",padding:20}}>No staff in this branch.</div>}
+        {staff.map(u=>{
+          const st=getStatus(u.id);
+          return (
+            <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f3f4f9"}}>
+              <div>
+                <div style={{fontWeight:700,color:B.dark,fontSize:13}}>{u.name}</div>
+                <div style={{fontSize:11,color:"#9fa8da"}}>{u.role} · {u.branch}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {ATTENDANCE_STATUS.map(s=>(
+                  <button key={s} onClick={()=>canMark&&markAtt(u.id,u.name,s)} style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${st===s?(statusColors[s]||["#37474f"])[0]:"#e8eaf6"}`,background:st===s?(statusColors[s]||["#37474f","#f3f4f9"])[1]:"#fff",color:st===s?(statusColors[s]||["#37474f"])[0]:"#9fa8da",fontSize:11,fontWeight:st===s?700:400,cursor:canMark?"pointer":"default"}}>{s}</button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Monthly Summary */}
+      <div style={{...S.card}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark}}>Monthly Summary</div>
+          <input type="month" style={{...S.inp,width:150,margin:0}} value={viewMonth} onChange={e=>setViewMonth(e.target.value)}/>
+        </div>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Staff","Present","Absent","Late","Half Day","Leave","Deduction Days"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {staff.map(u=>{
+              const uAtt=monthAtt.filter(a=>a.user_id===u.id);
+              const counts={Present:0,Absent:0,Late:0,"Half Day":0,Holiday:0,Leave:0};
+              uAtt.forEach(a=>{if(counts[a.status]!==undefined)counts[a.status]++;});
+              const deductDays=counts.Absent*1+counts.Late*0.25+counts["Half Day"]*0.5;
+              return (
+                <tr key={u.id}>
+                  <td style={S.td}><div style={{fontWeight:700}}>{u.name}</div></td>
+                  <td style={{...S.td,color:B.success,fontWeight:700}}>{counts.Present}</td>
+                  <td style={{...S.td,color:B.danger,fontWeight:700}}>{counts.Absent}</td>
+                  <td style={{...S.td,color:B.warn,fontWeight:700}}>{counts.Late}</td>
+                  <td style={{...S.td,color:"#7c3aed",fontWeight:700}}>{counts["Half Day"]}</td>
+                  <td style={S.td}>{counts.Leave}</td>
+                  <td style={{...S.td,fontWeight:800,color:deductDays>0?B.danger:B.success}}>{deductDays.toFixed(2)} days</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── PAYROLL / SALARY MODULE ──────────────────────────────────────────────────
+function Payroll({users,currentUser,invoices}) {
+  const salaryDB=useTable("salaries",{orderBy:"created_at",asc:false});
+  const advanceDB=useTable("salary_advances",{orderBy:"date",asc:false});
+  const attDB=useTable("attendance",{orderBy:"date",asc:false});
+  const [selMonth,setSelMonth]=useState(tod().slice(0,7));
+  const [showAdd,setShowAdd]=useState(false);
+  const [showAdvance,setShowAdvance]=useState(null);
+  const [showSlip,setShowSlip]=useState(null);
+
+  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS||currentUser.role==="Finance Officer";
+  if(!canAccess)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 Access restricted.</div>;
+
+  const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO);
+  const EF={user_id:"",basic:"",commission:"0",month:selMonth,notes:"",payment_method:"Cash"};
+  const [form,setForm]=useState(EF);
+  const [advForm,setAdvForm]=useState({user_id:"",amount:"",date:tod(),reason:"",deduct_month:selMonth});
+
+  // Get deductions from attendance
+  const getDeductions=(userId,month)=>{
+    const uAtt=attDB.data.filter(a=>a.user_id===userId&&a.date?.startsWith(month));
+    const counts={Absent:0,Late:0,"Half Day":0};
+    uAtt.forEach(a=>{if(counts[a.status]!==undefined)counts[a.status]++;});
+    return counts.Absent*1+counts.Late*0.25+counts["Half Day"]*0.5;
+  };
+
+  // Get pending advances for deduction
+  const getPendingAdvances=(userId,month)=>advanceDB.data.filter(a=>a.user_id===userId&&a.deduct_month===month&&!a.deducted).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
+
+  const calcNet=(userId,basic,commission)=>{
+    const deductDays=getDeductions(userId,selMonth);
+    const dailyRate=(parseFloat(basic)||0)/26;
+    const attDeduction=deductDays*dailyRate;
+    const advances=getPendingAdvances(userId,selMonth);
+    const gross=(parseFloat(basic)||0)+(parseFloat(commission)||0);
+    return {gross,attDeduction,advances,net:gross-attDeduction-advances};
+  };
+
+  const saveSalary=async()=>{
+    if(!form.user_id||!form.basic)return;
+    const user=users.find(u=>u.id===form.user_id);
+    const {gross,attDeduction,advances,net}=calcNet(form.user_id,form.basic,form.commission);
+    const deductDays=getDeductions(form.user_id,selMonth);
+    await salaryDB.insert({...form,basic:parseFloat(form.basic),commission:parseFloat(form.commission||0),att_deduction:attDeduction,advance_deduction:advances,deduct_days:deductDays,gross,net,user_name:user?.name,paid:false,created_by:currentUser.id});
+    // Mark advances as deducted
+    const pendAdv=advanceDB.data.filter(a=>a.user_id===form.user_id&&a.deduct_month===selMonth&&!a.deducted);
+    for(const a of pendAdv) await advanceDB.update(a.id,{deducted:true});
+    setShowAdd(false);setForm(EF);
+  };
+
+  const markPaid=async(sal)=>{
+    await salaryDB.update(sal.id,{paid:true,paid_date:tod(),payment_method:sal.payment_method||"Cash"});
+  };
+
+  const printSlip=(sal)=>{
+    const user=users.find(u=>u.id===sal.user_id);
+    const html=`<!DOCTYPE html><html><head><title>Salary Slip</title>
+    <style>body{font-family:Arial;max-width:600px;margin:40px auto;padding:20px}
+    .header{text-align:center;border-bottom:2px solid #2d3a8c;padding-bottom:16px;margin-bottom:20px}
+    .company{font-size:20px;font-weight:900;color:#2d3a8c}.title{font-size:16px;font-weight:700;text-align:center;margin:16px 0}
+    .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+    .label{color:#666;font-size:13px}.value{font-weight:700;font-size:13px}
+    .total{font-size:18px;font-weight:900;color:#2d3a8c;text-align:right;padding:12px 0;border-top:2px solid #2d3a8c;margin-top:10px}
+    </style></head><body>
+    <div class="header"><div class="company">Border and Bridges Pvt. Ltd.</div></div>
+    <div class="title">SALARY SLIP — ${sal.month}</div>
+    <div class="row"><span class="label">Employee</span><span class="value">${sal.user_name||"—"}</span></div>
+    <div class="row"><span class="label">Month</span><span class="value">${sal.month}</span></div>
+    <div class="row"><span class="label">Basic Salary</span><span class="value">PKR ${(sal.basic||0).toLocaleString()}</span></div>
+    <div class="row"><span class="label">Commission</span><span class="value">PKR ${(sal.commission||0).toLocaleString()}</span></div>
+    <div class="row"><span class="label">Gross Salary</span><span class="value">PKR ${(sal.gross||0).toLocaleString()}</span></div>
+    <div class="row"><span class="label">Attendance Deduction (${sal.deduct_days||0} days)</span><span class="value" style="color:#dc2626">- PKR ${(sal.att_deduction||0).toFixed(0)}</span></div>
+    <div class="row"><span class="label">Advance Deduction</span><span class="value" style="color:#dc2626">- PKR ${(sal.advance_deduction||0).toLocaleString()}</span></div>
+    <div class="total">NET PAYABLE: PKR ${(sal.net||0).toLocaleString()}</div>
+    <div style="margin-top:20px;font-size:11px;color:#999;text-align:center">Payment Method: ${sal.payment_method||"—"} · Paid: ${sal.paid_date||"Pending"}</div>
+    </body></html>`;
+    const w=window.open("","_blank");w.document.write(html);w.document.close();w.print();
+  };
+
+  const monthSalaries=salaryDB.data.filter(s=>s.month===selMonth);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Payroll & Salaries</h2><p style={S.sub}>{selMonth} · {monthSalaries.length} salaries processed</p></div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>setShowAdvance(true)} style={S.ghost}>+ Advance</button>
+          {currentUser.role===ROLES.CEO&&<button onClick={()=>setShowAdd(true)} style={S.btn(B.primary)}>+ Process Salary</button>}
+        </div>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <input type="month" style={{...S.inp,width:160,margin:0}} value={selMonth} onChange={e=>setSelMonth(e.target.value)}/>
+      </div>
+
+      {/* Staff salary cards */}
+      <div style={{display:"grid",gap:12,marginBottom:20}}>
+        {staff.map(u=>{
+          const sal=monthSalaries.find(s=>s.user_id===u.id);
+          const deductDays=getDeductions(u.id,selMonth);
+          const pendAdv=getPendingAdvances(u.id,selMonth);
+          return (
+            <div key={u.id} style={{...S.card,borderLeft:`4px solid ${sal?.paid?B.success:sal?B.warn:B.light}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:700,color:B.dark,fontSize:14}}>{u.name}</div>
+                  <div style={{fontSize:11,color:"#9fa8da"}}>{u.role} · {u.branch}</div>
+                  <div style={{display:"flex",gap:8,marginTop:6}}>
+                    {deductDays>0&&<Pill text={`${deductDays.toFixed(1)} days deducted`} color="#7c5100" bg="#fef3c7"/>}
+                    {pendAdv>0&&<Pill text={`Advance: ${fmt(pendAdv)}`} color="#9b1c1c" bg="#fee2e2"/>}
+                  </div>
+                </div>
+                {sal?(
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:18,fontWeight:900,color:B.primary}}>{fmt(sal.net)}</div>
+                    <div style={{fontSize:11,color:"#9fa8da"}}>Gross: {fmt(sal.gross)}</div>
+                    <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"flex-end"}}>
+                      <button onClick={()=>printSlip(sal)} style={{...S.ghost,fontSize:11,padding:"4px 10px"}}>🖨️ Slip</button>
+                      {!sal.paid&&currentUser.role===ROLES.CEO&&<button onClick={()=>markPaid(sal)} style={{...S.btn(B.success),fontSize:11,padding:"4px 10px"}}>✓ Mark Paid</button>}
+                      {sal.paid&&<Pill text="✓ Paid" color="#065f46" bg="#d1fae5"/>}
+                    </div>
+                  </div>
+                ):(
+                  <div style={{color:"#9fa8da",fontSize:12}}>Not processed yet</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Pending Advances */}
+      {advanceDB.data.filter(a=>!a.deducted).length>0&&(
+        <div style={{...S.card,marginBottom:20}}>
+          <div style={{fontSize:13,fontWeight:700,color:B.danger,marginBottom:10}}>⚠️ Pending Advances (not yet deducted)</div>
+          {advanceDB.data.filter(a=>!a.deducted).map(a=>{
+            const u=users.find(u=>u.id===a.user_id);
+            return (
+              <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f3f4f9"}}>
+                <div><span style={{fontWeight:700}}>{u?.name||"—"}</span><span style={{fontSize:12,color:"#5c6bc0",marginLeft:8}}>{a.reason}</span></div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontWeight:700,color:B.danger}}>{fmt(a.amount)}</span>
+                  <span style={{fontSize:11,color:"#9fa8da"}}>Deduct in: {a.deduct_month}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Process Salary Modal */}
+      {showAdd&&(
+        <Modal title="Process Salary" onClose={()=>setShowAdd(false)} w={520}>
+          <Fld label="Select Staff Member">
+            <select style={S.sel} value={form.user_id} onChange={e=>setForm({...form,user_id:e.target.value})}>
+              <option value="">— Select —</option>
+              {staff.filter(u=>!monthSalaries.find(s=>s.user_id===u.id)).map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+            </select>
+          </Fld>
+          {form.user_id&&(()=>{
+            const deductDays=getDeductions(form.user_id,selMonth);
+            const pendAdv=getPendingAdvances(form.user_id,selMonth);
+            const {gross,attDeduction,net}=calcNet(form.user_id,form.basic,form.commission);
+            return (
+              <div>
+                <R2>
+                  <Fld label="Basic Salary (PKR)"><input type="number" style={S.inp} value={form.basic} onChange={e=>setForm({...form,basic:e.target.value})}/></Fld>
+                  <Fld label="Commission (PKR)"><input type="number" style={S.inp} value={form.commission} onChange={e=>setForm({...form,commission:e.target.value})}/></Fld>
+                </R2>
+                {form.basic&&(
+                  <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+                    <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:8}}>Salary Breakdown</div>
+                    {[["Basic",fmt(form.basic)],["Commission",fmt(form.commission||0)],["Gross",fmt(gross)],[`Att. Deduction (${deductDays.toFixed(1)}d)`,`- ${fmt(attDeduction)}`],[`Advance Deduction`,`- ${fmt(pendAdv)}`]].map(([l,v])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:13}}>
+                        <span style={{color:"#5c6bc0"}}>{l}</span><span style={{fontWeight:700}}>{v}</span>
+                      </div>
+                    ))}
+                    <div style={{borderTop:"2px solid #2d3a8c",marginTop:8,paddingTop:8,display:"flex",justifyContent:"space-between"}}>
+                      <span style={{fontWeight:800,color:B.dark}}>Net Payable</span>
+                      <span style={{fontWeight:900,fontSize:16,color:B.primary}}>{fmt(net)}</span>
+                    </div>
+                  </div>
+                )}
+                <Fld label="Payment Method">
+                  <div style={{display:"flex",gap:6}}>
+                    {["Cash","Bank Transfer"].map(m=><button key={m} onClick={()=>setForm({...form,payment_method:m})} style={{padding:"6px 14px",borderRadius:8,border:`2px solid ${form.payment_method===m?B.primary:"#c5cae9"}`,background:form.payment_method===m?B.light:"#fff",color:form.payment_method===m?B.primary:"#5c6bc0",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m}</button>)}
+                  </div>
+                </Fld>
+              </div>
+            );
+          })()}
+          <button onClick={saveSalary} style={{...S.btn(B.primary),width:"100%",justifyContent:"center",padding:12}}>Process & Save Salary</button>
+        </Modal>
+      )}
+
+      {/* Advance Modal */}
+      {showAdvance&&(
+        <Modal title="Give Salary Advance" onClose={()=>setShowAdvance(null)} w={440}>
+          <Fld label="Staff Member">
+            <select style={S.sel} value={advForm.user_id} onChange={e=>setAdvForm({...advForm,user_id:e.target.value})}>
+              <option value="">— Select —</option>
+              {staff.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </Fld>
+          <R2>
+            <Fld label="Amount (PKR)"><input type="number" style={S.inp} value={advForm.amount} onChange={e=>setAdvForm({...advForm,amount:e.target.value})}/></Fld>
+            <Fld label="Date"><input type="date" style={S.inp} value={advForm.date} onChange={e=>setAdvForm({...advForm,date:e.target.value})}/></Fld>
+          </R2>
+          <Fld label="Reason"><input style={S.inp} value={advForm.reason} onChange={e=>setAdvForm({...advForm,reason:e.target.value})} placeholder="Reason for advance"/></Fld>
+          <Fld label="Deduct in Month"><input type="month" style={S.inp} value={advForm.deduct_month} onChange={e=>setAdvForm({...advForm,deduct_month:e.target.value})}/></Fld>
+          <button onClick={async()=>{if(!advForm.user_id||!advForm.amount)return;await advanceDB.insert({...advForm,amount:parseFloat(advForm.amount),deducted:false,created_by:currentUser.id});setShowAdvance(null);setAdvForm({user_id:"",amount:"",date:tod(),reason:"",deduct_month:selMonth});}} style={{...S.btn(B.warn),width:"100%",justifyContent:"center",padding:12}}>Give Advance</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── STAFF LEDGER ─────────────────────────────────────────────────────────────
+function StaffLedger({users,currentUser}) {
+  const salaryDB=useTable("salaries",{orderBy:"month",asc:false});
+  const advanceDB=useTable("salary_advances",{orderBy:"date",asc:false});
+  const [selUser,setSelUser]=useState("");
+
+  const canAccess=currentUser.role===ROLES.CEO||currentUser.role===ROLES.ACCOUNTS;
+  if(!canAccess)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
+
+  const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO);
+  const userSalaries=salaryDB.data.filter(s=>!selUser||s.user_id===selUser);
+  const userAdvances=advanceDB.data.filter(a=>!selUser||a.user_id===selUser);
+
+  const totalEarned=userSalaries.reduce((a,s)=>a+(s.gross||0),0);
+  const totalDeductions=userSalaries.reduce((a,s)=>a+(s.att_deduction||0)+(s.advance_deduction||0),0);
+  const totalNet=userSalaries.reduce((a,s)=>a+(s.net||0),0);
+  const totalPaid=userSalaries.filter(s=>s.paid).reduce((a,s)=>a+(s.net||0),0);
+  const totalAdvances=userAdvances.reduce((a,a2)=>a+(a2.amount||0),0);
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Staff Ledger</h2><p style={S.sub}>Complete payment history per staff member</p></div>
+
+      <Fld label="Select Staff Member">
+        <select style={{...S.sel,maxWidth:300}} value={selUser} onChange={e=>setSelUser(e.target.value)}>
+          <option value="">— All Staff —</option>
+          {staff.map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+        </select>
+      </Fld>
+
+      {/* Summary */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+        <Stat label="Total Earned" value={fmt(totalEarned)} color={B.primary} icon="💼"/>
+        <Stat label="Total Deductions" value={fmt(totalDeductions)} color={B.danger} icon="➖"/>
+        <Stat label="Net Payable" value={fmt(totalNet)} color={B.secondary} icon="💰"/>
+        <Stat label="Total Paid" value={fmt(totalPaid)} color={B.success} icon="✓"/>
+        <Stat label="Total Advances" value={fmt(totalAdvances)} color={B.warn} icon="⚡"/>
+      </div>
+
+      {/* Salary History */}
+      <div style={{...S.card,marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Salary History</div>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Month","Staff","Basic","Commission","Gross","Deductions","Net","Method","Status"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {userSalaries.map(s=>(
+              <tr key={s.id}>
+                <td style={{...S.td,fontWeight:700}}>{s.month}</td>
+                <td style={S.td}>{s.user_name||users.find(u=>u.id===s.user_id)?.name||"—"}</td>
+                <td style={S.td}>{fmt(s.basic)}</td>
+                <td style={S.td}>{fmt(s.commission)}</td>
+                <td style={{...S.td,fontWeight:700}}>{fmt(s.gross)}</td>
+                <td style={{...S.td,color:B.danger}}>{fmt((s.att_deduction||0)+(s.advance_deduction||0))}</td>
+                <td style={{...S.td,fontWeight:800,color:B.primary}}>{fmt(s.net)}</td>
+                <td style={{...S.td,fontSize:11}}>{s.payment_method||"—"}</td>
+                <td style={S.td}><Pill text={s.paid?"✓ Paid":"Pending"} color={s.paid?"#065f46":"#7c5100"} bg={s.paid?"#d1fae5":"#fef3c7"}/></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {userSalaries.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No salary records yet.</div>}
+      </div>
+
+      {/* Advances History */}
+      <div style={S.card}>
+        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Advances History</div>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Date","Staff","Amount","Reason","Deduct Month","Status"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {userAdvances.map(a=>(
+              <tr key={a.id}>
+                <td style={{...S.td,fontSize:11}}>{a.date}</td>
+                <td style={S.td}>{users.find(u=>u.id===a.user_id)?.name||"—"}</td>
+                <td style={{...S.td,fontWeight:700,color:B.danger}}>{fmt(a.amount)}</td>
+                <td style={S.td}>{a.reason||"—"}</td>
+                <td style={S.td}>{a.deduct_month}</td>
+                <td style={S.td}><Pill text={a.deducted?"✓ Deducted":"Pending"} color={a.deducted?"#065f46":"#9b1c1c"} bg={a.deducted?"#d1fae5":"#fee2e2"}/></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {userAdvances.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No advances recorded.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── INVOICE TEMPLATE DESIGNER ────────────────────────────────────────────────
+function InvoiceTemplateDesigner({currentUser,settings,settingsDB}) {
+  const [tmpl,setTmpl]=useState(()=>{
+    try{return JSON.parse(settings?.invoice_template||"{}");}catch{return {};}
+  });
+  const [saved,setSaved]=useState(false);
+
+  if(currentUser.role!==ROLES.CEO)
+    return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO only.</div>;
+
+  const save=async()=>{
+    const existing=settingsDB.data.find(s=>s.key==="invoice_template");
+    const val=JSON.stringify(tmpl);
+    if(existing) await settingsDB.update(existing.id,{value:val});
+    else await settingsDB.insert({key:"invoice_template",value:val});
+    // Also save prefix and terms
+    for(const [k,v] of (["invoice_prefix",tmpl.prefix||"BNB"],["invoice_terms",tmpl.terms||""],["company_name",tmpl.company||""],["address",tmpl.address||""],["phone",tmpl.phone||""]]) {
+      const ex=settingsDB.data.find(s=>s.key===k);
+      if(ex) await settingsDB.update(ex.id,{value:v});
+      else await settingsDB.insert({key:k,value:v});
+    }
+    setSaved(true);setTimeout(()=>setSaved(false),2000);
+  };
+
+  const colors=["#2d3a8c","#1a91c7","#059669","#dc2626","#7c3aed","#d97706","#1a2057","#374151"];
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Invoice Template Designer</h2><p style={S.sub}>Design your invoice and receipt layout — used everywhere</p></div>
+        <button onClick={save} style={S.btn(saved?B.success:B.primary)}>{saved?"✓ Saved!":"Save Template"}</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        {/* Settings */}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={S.card}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Company Details</div>
+            <Fld label="Company Name"><input style={S.inp} value={tmpl.company||""} onChange={e=>setTmpl({...tmpl,company:e.target.value})} placeholder="Border and Bridges Pvt. Ltd."/></Fld>
+            <Fld label="Address"><input style={S.inp} value={tmpl.address||""} onChange={e=>setTmpl({...tmpl,address:e.target.value})} placeholder="Office address"/></Fld>
+            <Fld label="Phone"><input style={S.inp} value={tmpl.phone||""} onChange={e=>setTmpl({...tmpl,phone:e.target.value})} placeholder="+92 42 XXXXXXX"/></Fld>
+            <Fld label="Email"><input style={S.inp} value={tmpl.email||""} onChange={e=>setTmpl({...tmpl,email:e.target.value})} placeholder="info@bordernbridges.com"/></Fld>
+          </div>
+
+          <div style={S.card}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Invoice Settings</div>
+            <Fld label="Invoice Prefix"><input style={S.inp} value={tmpl.prefix||"BNB"} onChange={e=>setTmpl({...tmpl,prefix:e.target.value})} placeholder="e.g. BNB"/></Fld>
+            <Fld label="Logo Position">
+              <div style={{display:"flex",gap:8}}>
+                {["Left","Center","Right"].map(p=><button key={p} onClick={()=>setTmpl({...tmpl,logo_position:p})} style={{flex:1,padding:"7px",borderRadius:8,border:`2px solid ${tmpl.logo_position===p?B.primary:"#c5cae9"}`,background:tmpl.logo_position===p?B.light:"#fff",color:tmpl.logo_position===p?B.primary:"#5c6bc0",fontSize:12,fontWeight:600,cursor:"pointer"}}>{p}</button>)}
+              </div>
+            </Fld>
+            <Fld label="Primary Color">
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {colors.map(c=><button key={c} onClick={()=>setTmpl({...tmpl,primary_color:c})} style={{width:32,height:32,borderRadius:"50%",background:c,border:tmpl.primary_color===c?"3px solid #000":"3px solid transparent",cursor:"pointer"}}/>)}
+              </div>
+            </Fld>
+          </div>
+
+          <div style={S.card}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Footer & Terms</div>
+            <Fld label="Footer Message"><input style={S.inp} value={tmpl.footer||""} onChange={e=>setTmpl({...tmpl,footer:e.target.value})} placeholder="Thank you for choosing Border and Bridges"/></Fld>
+            <Fld label="Terms & Conditions"><textarea style={{...S.inp,minHeight:80,resize:"vertical"}} value={tmpl.terms||""} onChange={e=>setTmpl({...tmpl,terms:e.target.value})} placeholder="All fees are non-refundable…"/></Fld>
+            <Fld label="Bank Details (for invoices)"><textarea style={{...S.inp,minHeight:60,resize:"vertical"}} value={tmpl.bank_details||""} onChange={e=>setTmpl({...tmpl,bank_details:e.target.value})} placeholder="Bank: HBL&#10;Account: XXXX-XXXX&#10;Title: Border and Bridges"/></Fld>
+          </div>
+        </div>
+
+        {/* Live Preview */}
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Live Preview</div>
+          <div style={{border:"1px solid #e8eaf6",borderRadius:8,overflow:"hidden",fontSize:11}}>
+            {/* Header */}
+            <div style={{background:tmpl.primary_color||B.primary,padding:"16px 20px",color:"#fff",textAlign:tmpl.logo_position==="Center"?"center":tmpl.logo_position==="Right"?"right":"left"}}>
+              <div style={{fontSize:16,fontWeight:900}}>{tmpl.company||"Border and Bridges Pvt. Ltd."}</div>
+              <div style={{opacity:0.8,marginTop:2}}>{tmpl.address||"Lahore, Pakistan"}</div>
+              <div style={{opacity:0.8}}>{tmpl.phone||""} {tmpl.email||""}</div>
+            </div>
+            {/* Body */}
+            <div style={{padding:"16px 20px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+                <div><div style={{fontSize:12,color:"#9fa8da"}}>INVOICE TO</div><div style={{fontWeight:700}}>Sample Client</div><div style={{color:"#5c6bc0"}}>🇬🇧 UK</div></div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:14,fontWeight:900,color:tmpl.primary_color||B.primary}}>{tmpl.prefix||"BNB"}-2026-0001</div><div style={{color:"#9fa8da"}}>Date: {tod()}</div></div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
+                <thead><tr style={{background:"#f8f9ff"}}><th style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"#9fa8da"}}>SERVICE</th><th style={{padding:"6px 8px",textAlign:"right",fontSize:10,color:"#9fa8da"}}>AMOUNT</th></tr></thead>
+                <tbody>
+                  <tr><td style={{padding:"6px 8px",borderBottom:"1px solid #f3f4f9"}}>Student Visa Application (UK)</td><td style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>PKR 50,000</td></tr>
+                  <tr><td style={{padding:"6px 8px",borderBottom:"1px solid #f3f4f9"}}>SOP / Personal Statement Writing</td><td style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>PKR 10,000</td></tr>
+                </tbody>
+              </table>
+              <div style={{textAlign:"right",fontWeight:900,fontSize:14,color:tmpl.primary_color||B.primary,marginBottom:12}}>Total: PKR 60,000</div>
+              {tmpl.bank_details&&<div style={{background:"#f8f9ff",borderRadius:6,padding:"8px 12px",fontSize:10,color:"#5c6bc0",whiteSpace:"pre-line",marginBottom:8}}>{tmpl.bank_details}</div>}
+            </div>
+            {/* Footer */}
+            <div style={{background:"#f8f9ff",padding:"10px 20px",textAlign:"center",fontSize:10,color:"#9fa8da",borderTop:"1px solid #e8eaf6"}}>
+              {tmpl.footer||"Thank you for choosing Border and Bridges"}
+              {tmpl.terms&&<div style={{marginTop:4,fontSize:9}}>{tmpl.terms}</div>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 const NAV = [
   { section:"Overview", items:[{key:"dashboard",label:"Dashboard",icon:"📊"},{key:"reporting",label:"Reports & Analytics",icon:"📈"}] },
   { section:"Counseling", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
   { section:"Processing", items:[{key:"processing",label:"Processing Tracker",icon:"🔄"},{key:"cases",label:"Active Cases",icon:"📋"}] },
   { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
-  { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
+  { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"agents",label:"Agents (B2B)",icon:"🤝"},{key:"expenses",label:"Expenses",icon:"💸"},{key:"pettycash",label:"Petty Cash",icon:"💵"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
+  { section:"HR", items:[{key:"attendance",label:"Attendance",icon:"📅"},{key:"payroll",label:"Payroll & Salaries",icon:"💰"},{key:"staffledger",label:"Staff Ledger",icon:"📖"},{key:"invoicetemplate",label:"Invoice Template",icon:"🎨"}] },
   { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"closedleads",label:"Closed Leads",icon:"❌"},{key:"activitylog",label:"Activity Log",icon:"🛡️"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
 ];
 
@@ -2498,6 +3733,7 @@ export default function App() {
   const [showReminderPopup,setShowReminderPopup]=useState(false);
 
   const leadsDB    =useTable("leads",{orderBy:"created_at",asc:false});
+  const agentsDB   =useTable("agents",{orderBy:"created_at",asc:true});
   const tasksDB    =useTable("tasks",{orderBy:"created_at",asc:false});
   const invoicesDB =useTable("invoices",{orderBy:"created_at",asc:false});
   const accountsDB =useTable("accounts",{orderBy:"code",asc:true});
@@ -2545,7 +3781,7 @@ export default function App() {
   };
 
   const props={
-    leads:leadsDB.data,leadsDB,tasks:tasksDB.data,tasksDB,
+    leads:leadsDB.data,leadsDB,tasks:tasksDB.data,tasksDB,agents:agentsDB.data,agentsDB,
     invoices:invoicesDB.data,invoicesDB,accounts:accountsDB.data,accountsDB,
     journals:journalsDB.data,journalsDB,bankTx:bankTxDB.data,bankTxDB,
     users:usersDB.data,usersDB,waLeads:waLeadsDB.data,waLeadsDB,
@@ -2565,10 +3801,17 @@ export default function App() {
       case "activitylog":   return <ActivityLog {...props}/>;
       case "whatsapp":      return <WhatsAppInbox {...props}/>;
       case "notifications": return <Notifications {...props}/>;
-      case "invoices":      return <Invoices {...props}/>;
+      case "invoices":      return <Invoices {...props} agents={agentsDB.data}/>;
       case "accounting":    return <Accounting {...props}/>;
       case "bulkimport":    return <BulkImport {...props}/>;
       case "closedleads":   return <ClosedLeads {...props}/>;
+      case "agents":        return <AgentsModule agents={agentsDB.data} agentsDB={agentsDB} invoices={invoicesDB.data} leads={leadsDB.data} currentUser={currentUser}/>;
+      case "expenses":      return <Expenses currentUser={currentUser} settings={settings}/>;
+      case "pettycash":     return <PettyCash currentUser={currentUser}/>;
+      case "attendance":    return <Attendance users={usersDB.data} currentUser={currentUser}/>;
+      case "payroll":       return <Payroll users={usersDB.data} currentUser={currentUser} invoices={invoicesDB.data}/>;
+      case "staffledger":   return <StaffLedger users={usersDB.data} currentUser={currentUser}/>;
+      case "invoicetemplate": return <InvoiceTemplateDesigner currentUser={currentUser} settings={settings} settingsDB={settingsDB}/>;
       case "settings":      return <Settings {...props}/>;
       default: return null;
     }
