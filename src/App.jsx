@@ -318,8 +318,11 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const [tab,setTab]=useState("GCL");
   const [showAdd,setShowAdd]=useState(false);
   const [sel,setSel]=useState(null);
+  const [leadTab,setLeadTab]=useState("overview");
   const [noteText,setNoteText]=useState("");
   const [noteType,setNoteType]=useState("Call");
+  const [leadTaskForm,setLeadTaskForm]=useState({title:"",due_date:"",priority:"High"});
+  const [showLeadTask,setShowLeadTask]=useState(false);
   const [search,setSearch]=useState("");
   const [selected,setSelected]=useState(new Set());
   const [batchAssignee,setBatchAssignee]=useState("");
@@ -523,7 +526,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder2)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder2)?700:400}}>{lead.reminder2||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder3)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder3)?700:400}}>{lead.reminder3||"—"}</td>
                   </>}
-                  <td style={{...S.td,whiteSpace:"nowrap"}}><button onClick={()=>setSel({...lead})} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>Open</button></td>
+                  <td style={{...S.td,whiteSpace:"nowrap"}}><button onClick={()=>{setSel({...lead});setLeadTab("overview");}} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>Open</button></td>
                 </tr>
               );
             })}
@@ -534,66 +537,249 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
       </div>
 
       {sel&&(
-        <Modal title={`${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={700}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:14}}>
-            {[["Phone",sel.phone],["Email",sel.email||"—"],["Source",sel.source],["Branch",sel.branch],["IELTS",sel.ielts_score||"—"],["Intake",sel.intake_target||"—"],["Last Qual.",sel.last_qualification||"—"],["Qual. Year",sel.last_qualification_year||"—"],["Status",sel.status||"New"]].map(([k,v])=>(
-              <div key={k}><div style={S.lbl}>{k}</div><div style={{fontSize:13,fontWeight:600,color:B.dark}}>{v}</div></div>
+        <Modal title={`${sel.name} · ${sel.list||"GCL"}`} onClose={()=>{setSel(null);setLeadTab("overview");}} w={740}>
+          {/* Status bar */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,padding:"8px 12px",background:"#f0f4ff",borderRadius:10}}>
+            <span style={{fontSize:11,background:sel.list==="ACL"?"#d1fae5":sel.list==="BCL"?"#fef3c7":sel.list==="PCL"?"#dbeafe":"#e0e7ff",color:sel.list==="ACL"?"#065f46":sel.list==="BCL"?"#854d0e":sel.list==="PCL"?"#1e40af":"#3730a3",borderRadius:6,padding:"3px 10px",fontWeight:700}}>📋 {sel.list||"GCL"}</span>
+            {sel.source&&<span style={{fontSize:11,background:"#f3e8ff",color:"#6b21a8",borderRadius:6,padding:"3px 10px",fontWeight:600}}>🔗 {sel.source}</span>}
+            {sel.stage&&<span style={{fontSize:11,background:"#fef9c3",color:"#854d0e",borderRadius:6,padding:"3px 10px",fontWeight:600}}>📍 {sel.stage}</span>}
+            {sel.phone&&<span style={{fontSize:11,background:"#dcfce7",color:"#166534",borderRadius:6,padding:"3px 10px",fontWeight:600}}>📞 {sel.phone}</span>}
+            {sel.country&&<span style={{fontSize:11,background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"3px 10px",fontWeight:600}}>🌍 {sel.country}</span>}
+            <span style={{fontSize:11,background:"#f1f5f9",color:"#475569",borderRadius:6,padding:"3px 10px",fontWeight:600}}>⭐ Score: {sel.score||1}/5</span>
+          </div>
+
+          {/* Tabs */}
+          <div style={{display:"flex",gap:3,marginBottom:14,borderBottom:"2px solid #eef0fb",flexWrap:"wrap"}}>
+            {[["overview","📊 Overview"],["edit","✏️ Edit"],["history","🔄 History"],["notes","💬 Log"],["tasks","✅ Tasks"]].map(([k,label])=>(
+              <button key={k} onClick={()=>setLeadTab(k)} style={{padding:"8px 13px",borderRadius:"8px 8px 0 0",border:"none",background:leadTab===k?B.primary:"transparent",color:leadTab===k?"#fff":"#5c6bc0",fontSize:12,fontWeight:leadTab===k?700:500,cursor:"pointer"}}>
+                {label}
+              </button>
             ))}
           </div>
-          {sel.issue&&<div style={{marginBottom:14}}><div style={S.lbl}>Issue</div><div style={{fontSize:13,color:"#37474f",background:"#f8f9ff",padding:"8px 12px",borderRadius:8}}>{sel.issue}</div></div>}
-          {sel.remarks&&<div style={{marginBottom:14}}><div style={S.lbl}>Remarks</div><div style={{fontSize:13,color:"#37474f",background:"#f8f9ff",padding:"8px 12px",borderRadius:8}}>{sel.remarks}</div></div>}
 
-          {/* Editable fields */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,padding:14,background:"#f8f9ff",borderRadius:10}}>
-            <Fld label="Status"><select style={S.sel} value={sel.status||"New"} onChange={e=>{leadsDB.update(sel.id,{status:e.target.value});setSel(p=>({...p,status:e.target.value}));}}><option>New</option><option>Active</option><option>Pending Docs</option><option>Follow Up</option><option>Won</option><option>Lost</option></select></Fld>
-            <Fld label="Issue"><input style={S.inp} value={sel.issue||""} onChange={e=>setSel(p=>({...p,issue:e.target.value}))} onBlur={()=>leadsDB.update(sel.id,{issue:sel.issue})} placeholder="Any issue or concern…"/></Fld>
-            <Fld label="Remarks"><input style={S.inp} value={sel.remarks||""} onChange={e=>setSel(p=>({...p,remarks:e.target.value}))} onBlur={()=>leadsDB.update(sel.id,{remarks:sel.remarks})} placeholder="Internal remarks…"/></Fld>
-            {tab==="PCL"&&<>
-              <Fld label="Reminder 1"><input type="date" style={S.inp} value={sel.reminder1||""} onChange={e=>{leadsDB.update(sel.id,{reminder1:e.target.value});setSel(p=>({...p,reminder1:e.target.value}));}}/></Fld>
-              <Fld label="Reminder 2"><input type="date" style={S.inp} value={sel.reminder2||""} onChange={e=>{leadsDB.update(sel.id,{reminder2:e.target.value});setSel(p=>({...p,reminder2:e.target.value}));}}/></Fld>
-              <Fld label="Reminder 3"><input type="date" style={S.inp} value={sel.reminder3||""} onChange={e=>{leadsDB.update(sel.id,{reminder3:e.target.value});setSel(p=>({...p,reminder3:e.target.value}));}}/></Fld>
-            </>}
-          </div>
-
-          <div style={{marginBottom:14}}><div style={S.lbl}>Score</div><Stars score={sel.score||3} onChange={s=>setScore(sel,s)}/></div>
-          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#5c6bc0",textTransform:"uppercase",marginBottom:10}}>Checklist</div>
-            {[{f:"consultation_done",l:"Consultation Done"},{f:"agreement_signed",l:"Agreement Signed"},{f:"payment_received",l:"Payment Received"},{f:"invoice_generated",l:"Invoice Generated"},{f:"all_doc_received",l:"All Documents Received"}].map(item=><Chk key={item.f} label={item.l} checked={sel[item.f]||false} onChange={()=>toggle(sel,item.f)}/>)}
-          </div>
-          {currentUser.role===ROLES.CEO&&<div style={{marginBottom:14}}><div style={S.lbl}>Move to List</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["GCL","PCL","BCL","ACL"].filter(l=>l!==sel.list).map(l=><button key={l} onClick={()=>moveList(sel,l)} style={S.btn(listC[l])}>→ {l}</button>)}</div></div>}
-          {currentUser.role===ROLES.CEO&&<div style={{marginBottom:14}}><div style={S.lbl}>Assign Counselor</div><select style={S.sel} value={sel.assigned_to||""} onChange={e=>{assign(sel,e.target.value);setSel(p=>({...p,assigned_to:e.target.value}))}}><option value="">-- Select --</option>{counselors.map(c=><option key={c.id} value={c.id}>{c.name} ({c.branch})</option>)}</select></div>}
-          <div style={{borderTop:"1px solid #e8eaf6",paddingTop:16}}>
-            <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>📞 Communication & Activity Log</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,marginBottom:12}}>
-              <select value={noteType} onChange={e=>setNoteType(e.target.value)} style={S.sel}>
-                {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
-              </select>
-              <input style={S.inp} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={`What happened on this ${noteType}? What did client say?`} onKeyDown={e=>e.key==="Enter"&&addNote(sel)}/>
-              <button onClick={()=>addNote(sel)} style={{...S.btn(),flexShrink:0,whiteSpace:"nowrap"}}>+ Log</button>
-            </div>
-            <div style={{maxHeight:300,overflowY:"auto"}}>
-              {[...(sel.notes||[])].reverse().map(note=>{
-                const typeColors={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"}};
-                const tc=typeColors[note.type]||typeColors.Other;
-                return (
-                  <div key={note.id} style={{display:"flex",gap:10,marginBottom:10}}>
-                    <div style={{width:34,height:34,borderRadius:10,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{tc.icon}</div>
-                    <div style={{flex:1,background:"#f8f9ff",borderRadius:10,padding:"10px 14px",border:"1px solid #e8eaf6"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                          <Pill text={note.type} color={tc.c} bg={tc.bg}/>
-                          <span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span>
-                        </div>
-                        <span style={{fontSize:10,color:"#9fa8da"}}>{note.at}</span>
-                      </div>
-                      <div style={{fontSize:13,color:"#37474f",lineHeight:1.5}}>{note.text}</div>
-                    </div>
+          {/* TAB: Overview */}
+          {leadTab==="overview"&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {/* Left: Client info */}
+              <div style={{...S.card,padding:14}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:10}}>Client Information</div>
+                {[["Full Name",sel.name],["Phone",sel.phone||"—"],["Email",sel.email||"—"],["Country",sel.country||"—"],["Branch",sel.branch||"—"],["Source",sel.source||"—"],["IELTS/PTE",sel.ielts_score||"—"],["Last Qualification",sel.last_qualification||"—"],["Qual. Year",sel.last_qualification_year||"—"],["Target Intake",sel.intake_target||"—"],["Enquiry Date",sel.enquiry_date||sel.created_at?.slice(0,10)||"—"]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #f3f4f9"}}>
+                    <span style={{fontSize:11,color:"#9fa8da"}}>{k}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:B.dark,maxWidth:160,textAlign:"right"}}>{v}</span>
                   </div>
-                );
-              })}
-              {!(sel.notes||[]).length&&<div style={{color:"#9fa8da",fontSize:13,textAlign:"center",padding:20,background:"#f8f9ff",borderRadius:10}}>No communication logged yet. Add the first entry above.</div>}
+                ))}
+              </div>
+              {/* Right: Pipeline status + tasks + last note */}
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{...S.card,padding:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:10}}>Pipeline Status</div>
+                  {[["List",sel.list||"GCL"],["Stage",sel.stage||"New Enquiry"],["Status",sel.status||"New"],["Score",`${sel.score||1} / 5 stars`],["Assigned To",(users||[]).find(u=>u.id===sel.assigned_to)?.name||"Unassigned"],["Last Contact",sel.last_contact||"—"]].map(([k,v])=>(
+                    <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #f3f4f9"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>{k}</span>
+                      <span style={{fontSize:11,fontWeight:600,color:k==="Stage"?B.primary:B.dark}}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{...S.card,padding:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Checklist</div>
+                  {[["consultation_done","Consultation Done"],["agreement_signed","Agreement Signed"],["payment_received","Payment Received"],["invoice_generated","Invoice Generated"],["all_doc_received","All Docs Received"]].map(([f,l])=>(
+                    <div key={f} style={{display:"flex",alignItems:"center",gap:8,padding:"3px 0"}}>
+                      <div style={{width:14,height:14,borderRadius:3,background:sel[f]?B.success:"#e8eaf6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#fff",flexShrink:0}}>{sel[f]?"✓":""}</div>
+                      <span style={{fontSize:11,color:sel[f]?"#065f46":"#9fa8da",fontWeight:sel[f]?600:400}}>{l}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Last comm */}
+                {(sel.notes||[]).length>0&&(
+                  <div style={{...S.card,padding:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Latest Note</div>
+                    {[...(sel.notes||[])].slice(-1).map(note=>(
+                      <div key={note.id}>
+                        <div style={{display:"flex",gap:6,marginBottom:4}}><Pill text={note.type||"Note"} color="#5c6bc0" bg="#eef0fb"/><span style={{fontSize:10,color:"#9fa8da"}}>{note.by} · {note.date||note.at?.slice(0,10)}</span></div>
+                        <div style={{fontSize:12,color:"#37474f",lineHeight:1.5}}>{note.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {sel.issue&&<div style={{...S.card,padding:12,gridColumn:"1/-1"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#f59e0b",marginBottom:4}}>⚠️ Issue / Concern</div>
+                <div style={{fontSize:12,color:"#37474f"}}>{sel.issue}</div>
+              </div>}
+              {sel.remarks&&<div style={{...S.card,padding:12,gridColumn:"1/-1"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:4}}>Remarks</div>
+                <div style={{fontSize:12,color:"#37474f"}}>{sel.remarks}</div>
+              </div>}
             </div>
-          </div>
+          )}
+
+          {/* TAB: Edit */}
+          {leadTab==="edit"&&(
+            <div>
+              <R2>
+                <Fld label="Status">
+                  <select style={S.sel} value={sel.status||"New"} onChange={e=>{leadsDB.update(sel.id,{status:e.target.value});setSel(p=>({...p,status:e.target.value}));}}>
+                    {["New","Contacted","Interested","Meeting Booked","Proposal Sent","Negotiating","Closed"].map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </Fld>
+                <Fld label="Score"><Stars score={sel.score||1} onChange={s=>{setScore(sel,s);setSel(p=>({...p,score:s}));}}/></Fld>
+              </R2>
+              <R2>
+                <Fld label="Issue / Concern"><input style={S.inp} value={sel.issue||""} onChange={e=>setSel(p=>({...p,issue:e.target.value}))} onBlur={e=>leadsDB.update(sel.id,{issue:e.target.value})} placeholder="Any issue or concern…"/></Fld>
+                <Fld label="Remarks"><input style={S.inp} value={sel.remarks||""} onChange={e=>setSel(p=>({...p,remarks:e.target.value}))} onBlur={e=>leadsDB.update(sel.id,{remarks:e.target.value})} placeholder="Internal remarks…"/></Fld>
+              </R2>
+              <R2>
+                <Fld label="IELTS/PTE Score"><input style={S.inp} value={sel.ielts_score||""} onChange={e=>setSel(p=>({...p,ielts_score:e.target.value}))} onBlur={e=>leadsDB.update(sel.id,{ielts_score:e.target.value})} placeholder="e.g. 6.5"/></Fld>
+                <Fld label="Target Intake"><input style={S.inp} value={sel.intake_target||""} onChange={e=>setSel(p=>({...p,intake_target:e.target.value}))} onBlur={e=>leadsDB.update(sel.id,{intake_target:e.target.value})} placeholder="Sep 2026"/></Fld>
+              </R2>
+              {tab==="PCL"&&<>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",margin:"8px 0 6px"}}>PCL Follow-up Reminders</div>
+                <R2>
+                  <Fld label="Reminder 1"><input type="date" style={S.inp} value={sel.reminder1||""} onChange={e=>{leadsDB.update(sel.id,{reminder1:e.target.value});setSel(p=>({...p,reminder1:e.target.value}));}}/></Fld>
+                  <Fld label="Reminder 2"><input type="date" style={S.inp} value={sel.reminder2||""} onChange={e=>{leadsDB.update(sel.id,{reminder2:e.target.value});setSel(p=>({...p,reminder2:e.target.value}));}}/></Fld>
+                </R2>
+                <Fld label="Reminder 3"><input type="date" style={S.inp} value={sel.reminder3||""} onChange={e=>{leadsDB.update(sel.id,{reminder3:e.target.value});setSel(p=>({...p,reminder3:e.target.value}));}}/></Fld>
+              </>}
+              <div style={{borderTop:"1px solid #e8eaf6",paddingTop:12,marginTop:4}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Checklist</div>
+                {[{f:"consultation_done",l:"Consultation Done"},{f:"agreement_signed",l:"Agreement Signed"},{f:"payment_received",l:"Payment Received"},{f:"invoice_generated",l:"Invoice Generated"},{f:"all_doc_received",l:"All Documents Received"}].map(item=>(
+                  <Chk key={item.f} label={item.l} checked={sel[item.f]||false} onChange={()=>toggle(sel,item.f)}/>
+                ))}
+              </div>
+              {currentUser.role===ROLES.CEO&&(
+                <div style={{borderTop:"1px solid #e8eaf6",paddingTop:12,marginTop:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>CEO Actions</div>
+                  <R2>
+                    <Fld label="Move to List">
+                      <div style={{display:"flex",gap:6}}>
+                        {["GCL","PCL","BCL","ACL"].filter(l=>l!==sel.list).map(l=>(
+                          <button key={l} onClick={()=>moveList(sel,l)} style={{...S.btn(listC[l]),fontSize:11,padding:"5px 10px"}}>→ {l}</button>
+                        ))}
+                      </div>
+                    </Fld>
+                    <Fld label="Assign To">
+                      <select style={S.sel} value={sel.assigned_to||""} onChange={e=>{assign(sel,e.target.value);setSel(p=>({...p,assigned_to:e.target.value}));}}>
+                        <option value="">-- Select --</option>
+                        {counselors.map(c=><option key={c.id} value={c.id}>{c.name} ({c.branch})</option>)}
+                      </select>
+                    </Fld>
+                  </R2>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: History / Timeline */}
+          {leadTab==="history"&&(
+            <div>
+              <div style={{fontSize:12,color:"#5c6bc0",marginBottom:12}}>Full activity timeline for {sel.name}</div>
+              <div style={{maxHeight:360,overflowY:"auto"}}>
+                {[...(sel.notes||[])].reverse().map((note,i)=>{
+                  const tc={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Processing:{c:"#0ea5e9",bg:"#e0f2fe",icon:"⚙️"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"}}[note.type]||{c:"#64748b",bg:"#f1f5f9",icon:"📝"};
+                  return(
+                    <div key={note.id} style={{display:"flex",gap:12,marginBottom:12}}>
+                      <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+                        <div style={{width:32,height:32,borderRadius:8,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{tc.icon}</div>
+                        {i<(sel.notes||[]).length-1&&<div style={{width:2,flex:1,background:"#e8eaf6",margin:"4px 0"}}/>}
+                      </div>
+                      <div style={{flex:1,paddingBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                          <div style={{display:"flex",gap:6}}><Pill text={note.type} color={tc.c} bg={tc.bg}/><span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span></div>
+                          <span style={{fontSize:10,color:"#9fa8da"}}>{note.date||note.at?.slice(0,10)}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"#37474f",lineHeight:1.5,background:"#f8f9ff",padding:"8px 10px",borderRadius:8}}>{note.text}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!(sel.notes||[]).length&&<div style={{textAlign:"center",color:"#9fa8da",padding:32,fontSize:13}}>No activity yet for this lead.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Communication Log */}
+          {leadTab==="notes"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"130px 1fr auto",gap:8,marginBottom:12}}>
+                <select style={S.sel} value={noteType} onChange={e=>setNoteType(e.target.value)}>
+                  {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
+                </select>
+                <input style={S.inp} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="What happened? What did the client say?" onKeyDown={e=>e.key==="Enter"&&addNote(sel)}/>
+                <button onClick={()=>addNote(sel)} style={{...S.btn(),flexShrink:0,whiteSpace:"nowrap"}}>+ Log</button>
+              </div>
+              <div style={{maxHeight:320,overflowY:"auto"}}>
+                {[...(sel.notes||[])].reverse().map(note=>{
+                  const tc={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Processing:{c:"#0ea5e9",bg:"#e0f2fe",icon:"⚙️"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"}}[note.type]||{c:"#64748b",bg:"#f1f5f9",icon:"📝"};
+                  return(
+                    <div key={note.id} style={{display:"flex",gap:8,marginBottom:8,padding:"8px 10px",background:"#f8f9ff",borderRadius:8,border:"1px solid #e8eaf6"}}>
+                      <div style={{width:28,height:28,borderRadius:6,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>{tc.icon}</div>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                          <div style={{display:"flex",gap:6}}><Pill text={note.type} color={tc.c} bg={tc.bg}/><span style={{fontSize:11,fontWeight:700,color:B.primary}}>{note.by}</span></div>
+                          <span style={{fontSize:10,color:"#9fa8da"}}>{note.date||note.at?.slice(0,10)}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"#37474f",lineHeight:1.5}}>{note.text}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!(sel.notes||[]).length&&<div style={{textAlign:"center",color:"#9fa8da",padding:24,fontSize:12}}>No communication logged yet. Add the first entry above.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Tasks */}
+          {leadTab==="tasks"&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:700,color:B.dark}}>Tasks for {sel.name}</div>
+                <button onClick={()=>setShowLeadTask(p=>!p)} style={{...S.btn("#7c3aed"),fontSize:11,padding:"5px 12px"}}>+ Add Task</button>
+              </div>
+              {showLeadTask&&(
+                <div style={{background:"#f8f9ff",borderRadius:10,padding:12,marginBottom:12,border:"1px solid #c5cae9"}}>
+                  <R2>
+                    <Fld label="Task"><input style={S.inp} value={leadTaskForm.title} onChange={e=>setLeadTaskForm({...leadTaskForm,title:e.target.value})} placeholder="e.g. Send offer letter"/></Fld>
+                    <Fld label="Due Date"><input type="date" style={S.inp} value={leadTaskForm.due_date} onChange={e=>setLeadTaskForm({...leadTaskForm,due_date:e.target.value})}/></Fld>
+                  </R2>
+                  <R2>
+                    <Fld label="Priority">
+                      <select style={S.sel} value={leadTaskForm.priority} onChange={e=>setLeadTaskForm({...leadTaskForm,priority:e.target.value})}>
+                        {["High","Medium","Low"].map(p=><option key={p}>{p}</option>)}
+                      </select>
+                    </Fld>
+                    <Fld label="Type">
+                      <select style={S.sel} value={leadTaskForm.type||"Follow-up"} onChange={e=>setLeadTaskForm({...leadTaskForm,type:e.target.value})}>
+                        {["Follow-up","Call","Email","Meeting","Document","Other"].map(t=><option key={t}>{t}</option>)}
+                      </select>
+                    </Fld>
+                  </R2>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={async()=>{
+                      if(!leadTaskForm.title.trim())return;
+                      await tasksDB.insert({title:leadTaskForm.title,client_name:sel.name,lead_id:sel.id,assigned_to:sel.assigned_to||currentUser.id,due_date:leadTaskForm.due_date||tod(),priority:leadTaskForm.priority||"High",type:leadTaskForm.type||"Follow-up",auto_generated:false});
+                      setLeadTaskForm({title:"",due_date:"",priority:"High",type:"Follow-up"});
+                      setShowLeadTask(false);
+                    }} style={{...S.btn("#7c3aed"),padding:"7px 16px",fontSize:11}}>Save Task</button>
+                    <button onClick={()=>setShowLeadTask(false)} style={{...S.ghost,padding:"7px 12px",fontSize:11}}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              <div style={{maxHeight:300,overflowY:"auto"}}>
+                {tasks.filter(t=>t.client_name===sel.name).sort((a,b)=>a.done-b.done).map(task=>(
+                  <div key={task.id} style={{display:"flex",gap:10,padding:"8px 10px",background:task.done?"#f0fdf4":"#fff",borderRadius:8,marginBottom:6,border:`1px solid ${task.done?"#bbf7d0":"#e8eaf6"}`}}>
+                    <div style={{width:16,height:16,borderRadius:4,background:task.done?B.success:task.due_date<tod()?"#dc2626":"#e8eaf6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#fff",flexShrink:0,marginTop:2}}>{task.done?"✓":task.due_date<tod()?"!":""}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:600,color:task.done?"#9fa8da":B.dark,textDecoration:task.done?"line-through":"none"}}>{task.title}</div>
+                      <div style={{fontSize:10,color:"#9fa8da",marginTop:2}}>Due: {task.due_date} · {task.priority} · {task.type}</div>
+                    </div>
+                    {!task.done&&<button onClick={()=>tasksDB.update(task.id,{done:true,completed_at:new Date().toISOString()})} style={{...S.ghost,fontSize:10,padding:"3px 8px",color:B.success,borderColor:B.success,flexShrink:0}}>Done ✓</button>}
+                  </div>
+                ))}
+                {!tasks.filter(t=>t.client_name===sel.name).length&&<div style={{textAlign:"center",color:"#9fa8da",fontSize:12,padding:24}}>No tasks for this lead yet.</div>}
+              </div>
+            </div>
+          )}
         </Modal>
       )}
 
@@ -698,7 +884,7 @@ Do you want to proceed anyway? (CEO override)`);
                 <td style={S.td}><Pill text={lead.stage} color="#37474f" bg="#f3f4f9"/></td>
                 <td style={S.td}>{lead.all_doc_received?<span style={{color:B.success,fontWeight:700,fontSize:12}}>Complete ✓</span>:<span style={{color:B.warn,fontSize:12}}>Pending</span>}</td>
                 <td style={S.td}><span style={{fontSize:12}}>{lead.branch?.split(" ")[0]}</span></td>
-                <td style={S.td}><button onClick={()=>setSel({...lead})} style={S.btn(B.secondary)}>Manage</button></td>
+                <td style={S.td}><button onClick={()=>{setSel({...lead});setLeadTab("overview");}} style={S.btn(B.secondary)}>Manage</button></td>
               </tr>
             ))}
           </tbody>
@@ -1058,6 +1244,12 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
                       </div>
                     </div>
                     <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
+                   {currentUser.role===ROLES.CEO&&!t.done&&(
+                     <select onChange={async e=>{if(!e.target.value)return;await tasksDB.update(t.id,{assigned_to:e.target.value});e.target.value="";}} style={{fontSize:10,padding:"2px 6px",borderRadius:6,border:"1px solid #c5cae9",background:"#f0f4ff",color:"#5c6bc0",cursor:"pointer",maxWidth:120}} defaultValue="">
+                       <option value="">↪ Reassign…</option>
+                       {users.filter(u=>u.active).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                     </select>
+                   )}
                   </div>
                   {/* Last call note */}
                   {lastNote&&(
@@ -1143,12 +1335,53 @@ This will move the lead to Closed Leads list.`))saveOutcome(true);}} style={{...
       )}
 
       {showAdd&&(
-        <Modal title="Add Task" onClose={()=>setShowAdd(false)}>
-          <Fld label="Task"><input style={S.inp} value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Task description…"/></Fld>
-          <R2><Fld label="Client"><input style={S.inp} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Optional"/></Fld><Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld></R2>
-          <R2><Fld label="Priority"><select style={S.sel} value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option>High</option><option>Medium</option><option>Low</option></select></Fld><Fld label="Type"><select style={S.sel} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Follow-up</option><option>Docs</option><option>Visa</option><option>Application</option><option>Finance</option><option>Other</option></select></Fld></R2>
-          {currentUser.role===ROLES.CEO&&<Fld label="Assign To"><select style={S.sel} value={form.assigned_to} onChange={e=>setForm({...form,assigned_to:e.target.value})}>{users.map(u=><option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></Fld>}
-          <button onClick={async()=>{if(!form.title)return;await tasksDB.insert({...form,done:false,auto_generated:false});setShowAdd(false);setForm({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});}} style={{...S.btn("#7c3aed"),width:"100%",justifyContent:"center",padding:12}}>Add Task</button>
+        <Modal title="➕ Add New Task" onClose={()=>setShowAdd(false)}>
+          <Fld label="Task Description">
+            <input style={S.inp} value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Follow up on offer letter for Mazhar…"/>
+          </Fld>
+          <R2>
+            <Fld label="Client Name"><input style={S.inp} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Optional — link to a client"/></Fld>
+            <Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld>
+          </R2>
+          <R2>
+            <Fld label="Priority">
+              <select style={S.sel} value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>
+                <option>High</option><option>Medium</option><option>Low</option>
+              </select>
+            </Fld>
+            <Fld label="Type">
+              <select style={S.sel} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
+                <option>Follow-up</option><option>Call</option><option>Email</option><option>Docs</option><option>Visa</option><option>Application</option><option>Finance</option><option>Meeting</option><option>Other</option>
+              </select>
+            </Fld>
+          </R2>
+          {/* Assign To — visible to CEO and Branch Manager */}
+          {(currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER)&&(
+            <Fld label="Assign To">
+              <select style={{...S.sel,borderColor:B.primary,fontWeight:700}} value={form.assigned_to} onChange={e=>setForm({...form,assigned_to:e.target.value})}>
+                <option value={currentUser.id}>👤 Myself ({currentUser.name})</option>
+                <option disabled>── Team Members ──</option>
+                {users.filter(u=>u.id!==currentUser.id&&u.active).map(u=>(
+                  <option key={u.id} value={u.id}>{u.name} — {u.role} ({u.branch?.split(" ")[0]||"HQ"})</option>
+                ))}
+              </select>
+            </Fld>
+          )}
+          {/* Who will get this task */}
+          {(currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER)&&(
+            <div style={{background:"#f0f4ff",borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:11,color:"#5c6bc0"}}>
+              📌 This task will be assigned to: <strong>{users.find(u=>u.id===form.assigned_to)?.name||currentUser.name}</strong>
+              {" "}({users.find(u=>u.id===form.assigned_to)?.role||currentUser.role})
+            </div>
+          )}
+          <button onClick={async()=>{
+            if(!form.title)return;
+            await tasksDB.insert({...form,done:false,auto_generated:false});
+            setShowAdd(false);
+            setForm({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
+          }} style={{...S.btn("#7c3aed"),width:"100%",justifyContent:"center",padding:12,fontSize:14}}>
+            ✅ Add Task
+          </button>
         </Modal>
       )}
     </div>
@@ -2258,7 +2491,7 @@ Proceed to "${ns}" anyway?`);
                   <td style={S.td}><span style={{fontSize:12,fontWeight:700,color:docDone===docList.length&&docList.length>0?B.success:B.warn}}>{docDone}/{docList.length}</span></td>
                   <td style={S.td}>{pendingReminders>0?<Pill text={`${pendingReminders} due`} color="#9b1c1c" bg="#fee2e2"/>:<span style={{fontSize:12,color:"#9fa8da"}}>—</span>}</td>
                   <td style={S.td}>{officer?.name?.split(" ")[0]||"—"}</td>
-                  <td style={S.td}><button onClick={()=>setSel({...lead})} style={S.btn(B.secondary)}>Manage</button></td>
+                  <td style={S.td}><button onClick={()=>{setSel({...lead});setLeadTab("overview");}} style={S.btn(B.secondary)}>Manage</button></td>
                 </tr>
               );
             })}
