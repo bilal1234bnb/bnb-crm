@@ -142,14 +142,15 @@ const Chk = ({label,checked,onChange}) => <label style={{display:"flex",alignIte
 const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c5100"},error:{bg:"#fce4ec",b:"#e91e63",t:"#880e4f"},info:{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"},success:{bg:"#e8f5e9",b:"#43a047",t:"#1b5e20"}}[type]||{bg:"#e8eaf6",b:"#3f51b5",t:"#1a237e"}; return <div style={{background:c.bg,border:`1px solid ${c.b}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:c.t,marginBottom:12}}>{msg}</div>; };
 const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
+const isMobile = () => window.innerWidth <= 768;
 const Modal = ({title,onClose,children,w=540}) => (
-  <div style={{position:"fixed",inset:0,background:"rgba(26,32,87,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-    <div style={{background:"#fff",borderRadius:16,width:"100%",maxWidth:w,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(26,32,87,0.25)"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 22px 14px",borderBottom:"1px solid #e8eaf6",position:"sticky",top:0,background:"#fff",zIndex:1}}>
-        <h3 style={{margin:0,fontSize:15,fontWeight:800,color:B.dark}}>{title}</h3>
-        <button onClick={onClose} style={{background:"#eef0fb",border:"none",borderRadius:7,padding:"5px 9px",cursor:"pointer",color:"#5c6bc0",fontSize:15}}>✕</button>
+  <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(26,32,87,0.55)",zIndex:1000,display:"flex",alignItems:isMobile()?"flex-end":"center",justifyContent:"center",padding:isMobile()?0:16}}>
+    <div style={{background:"#fff",borderRadius:isMobile()?"20px 20px 0 0":16,width:"100%",maxWidth:isMobile()?"100%":w,maxHeight:isMobile()?"90vh":"92vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(26,32,87,0.25)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:isMobile()?"14px 16px 12px":"18px 22px 14px",borderBottom:"1px solid #e8eaf6",position:"sticky",top:0,background:"#fff",zIndex:1}}>
+        <h3 style={{margin:0,fontSize:isMobile()?14:15,fontWeight:800,color:B.dark,flex:1,paddingRight:12}}>{title}</h3>
+        <button onClick={onClose} style={{background:"#eef0fb",border:"none",borderRadius:7,padding:"5px 9px",cursor:"pointer",color:"#5c6bc0",fontSize:15,flexShrink:0}}>✕</button>
       </div>
-      <div style={{padding:"18px 22px 22px"}}>{children}</div>
+      <div style={{padding:isMobile()?"14px 16px 32px":"18px 22px 22px"}}>{children}</div>
     </div>
   </div>
 );
@@ -256,12 +257,22 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser}) {
       {currentUser.role===ROLES.CEO&&pending.length>0&&<Alert type="warn" msg={`⚠️ ${pending.length} lead(s) pending your assignment`}/>}
       {overdue.length>0&&<Alert type="error" msg={`🔴 ${overdue.length} task(s) are overdue`}/>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:14,marginBottom:22}}>
-        <Stat label="Total Leads" value={leads.filter(l=>!l.lost).length} sub={`${leads.filter(l=>l.list==="ACL").length} active`} color={B.primary} icon="👥"/>
-        <Stat label="Visa WON" value={won} sub={`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`} color={B.success} icon="✈️"/>
-        <Stat label="Collected" value={`${Math.round(rev/1000)||0}K PKR`} color={B.secondary} icon="💰"/>
-        <Stat label="Open Tasks" value={openT.length} sub={`${overdue.length} overdue`} color={overdue.length>0?B.danger:B.warn} icon="✅"/>
-        <Stat label="Pending CEO" value={pending.length} color="#7c3aed" icon="⏳"/>
-        <Stat label="Win Rate" value={leads.length>0?Math.round((won/leads.length)*100)+"%":"0%"} color={B.accent} icon="📈"/>
+        {[
+          {label:"Total Leads",value:leads.filter(l=>!l.lost).length,sub:`${leads.filter(l=>l.list==="ACL").length} active`,color:B.primary,icon:"👥",page:"leads"},
+          {label:"Visa WON",value:won,sub:`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`,color:B.success,icon:"✈️",page:"processing"},
+          {label:"Collected",value:`${Math.round(rev/1000)||0}K PKR`,color:B.secondary,icon:"💰",page:"invoices"},
+          {label:"Open Tasks",value:openT.length,sub:`${overdue.length} overdue`,color:overdue.length>0?B.danger:B.warn,icon:"✅",page:"tasks"},
+          {label:"Pending CEO",value:pending.length,color:"#7c3aed",icon:"⏳",page:"leads"},
+          {label:"Win Rate",value:leads.length>0?Math.round((won/leads.length)*100)+"%":"0%",color:B.accent,icon:"📈",page:"reporting"},
+        ].map(({label,value,sub,color,icon,page})=>(
+          <div key={label} onClick={()=>setPage(page)} style={{...S.card,cursor:"pointer",transition:"box-shadow 0.2s",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}
+            onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(45,58,140,0.15)"}
+            onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,0.06)"}>
+            <div style={{fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:4}}>{icon} {label}</div>
+            <div style={{fontSize:22,fontWeight:900,color}}>{value}</div>
+            {sub&&<div style={{fontSize:10,color:"#9fa8da",marginTop:2}}>{sub}</div>}
+          </div>
+        ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:18}}>
         <div style={S.card}>
@@ -1859,8 +1870,14 @@ function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUs
   const cases=useMemo(()=>{
     let list=leads.filter(l=>l.list==="ACL"&&!l.lost);
     if(currentUser.role===ROLES.PROCESSING)list=list.filter(l=>l.assigned_to===currentUser.id||l.processing_officer===currentUser.id);
-    if(filterCountry!=="All")list=list.filter(l=>l.country===filterCountry);
-    if(filterStage!=="All")list=list.filter(l=>l.stage===filterStage);
+    if(filterCountry!=="All")list=list.filter(l=>l.country===filterCountry||getCountryKey(l.country)===getCountryKey(filterCountry));
+    if(filterStage==="All"){}
+    else if(filterStage==="doc")list=list.filter(l=>l.stage?.toLowerCase().includes("doc"));
+    else if(filterStage==="offer")list=list.filter(l=>l.stage?.toLowerCase().includes("offer")||l.stage?.toLowerCase().includes("conditional"));
+    else if(filterStage==="fee")list=list.filter(l=>l.stage?.toLowerCase().includes("fee"));
+    else if(filterStage==="visa filed")list=list.filter(l=>l.stage?.toLowerCase().includes("visa filed"));
+    else if(filterStage==="visa approved")list=list.filter(l=>l.stage?.toLowerCase().includes("visa approved")||l.stage?.toLowerCase().includes("visa won"));
+    else list=list.filter(l=>l.stage===filterStage);
     if(search.trim()){const q=search.toLowerCase();list=list.filter(l=>(l.name||"").toLowerCase().includes(q));}
     return list;
   },[leads,currentUser,filterCountry,filterStage,search]);
@@ -1938,14 +1955,22 @@ Proceed to "${ns}" anyway?`);
     <div>
       <div style={{marginBottom:18}}><h2 style={S.h2}>Processing Department</h2><p style={S.sub}>{cases.length} active cases · Full stage tracking & document control</p></div>
 
-      {/* Key Stats */}
+      {/* Key Stats — clickable filters */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
-        <Stat label="Total ACL Cases" value={leads.filter(l=>l.list==="ACL"&&!l.lost).length} color={B.primary} icon="📋"/>
-        <Stat label="Docs Requested" value={docsRequested} color={B.warn} icon="📄"/>
-        <Stat label="Offer Letter Recd" value={offerLetterRec} color={B.secondary} icon="🎓"/>
-        <Stat label="Fee Paid" value={feePaid} color="#7c3aed" icon="💳"/>
-        <Stat label="Visa Filed" value={visaFiled} color={B.accent} icon="✈️"/>
-        <Stat label="Visa WON" value={visaWon} color={B.success} icon="🎉"/>
+        {[
+          {label:"Total ACL Cases",value:leads.filter(l=>l.list==="ACL"&&!l.lost).length,color:B.primary,icon:"📋",filter:"All"},
+          {label:"Docs Requested",value:docsRequested,color:B.warn,icon:"📄",filter:"doc"},
+          {label:"Offer Letter Recd",value:offerLetterRec,color:B.secondary,icon:"🎓",filter:"offer"},
+          {label:"Fee Paid",value:feePaid,color:"#7c3aed",icon:"💳",filter:"fee"},
+          {label:"Visa Filed",value:visaFiled,color:B.accent,icon:"✈️",filter:"visa filed"},
+          {label:"Visa WON",value:visaWon,color:B.success,icon:"🎉",filter:"visa approved"},
+        ].map(({label,value,color,icon,filter})=>(
+          <div key={label} onClick={()=>setFilterStage(prev=>prev===filter?"All":filter)}
+            style={{...S.card,cursor:"pointer",borderLeft:`4px solid ${filterStage===filter?color:"#e8eaf6"}`,background:filterStage===filter?"#f8f9ff":"#fff",transition:"border 0.2s"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:4}}>{icon} {label}</div>
+            <div style={{fontSize:24,fontWeight:900,color}}>{value}</div>
+          </div>
+        ))}
       </div>
 
       {/* Filters + Search */}
@@ -4684,13 +4709,42 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:'Outfit',sans-serif;background:#f0f2fd;color:#37474f}
+        body{font-family:'Outfit',sans-serif;background:#f0f2fd;color:#37474f;-webkit-text-size-adjust:100%}
         ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#c5cae9;border-radius:4px}
         input:focus,select:focus,textarea:focus{border-color:#2d3a8c!important;box-shadow:0 0 0 3px rgba(45,58,140,0.12)!important;outline:none}
         button:active{transform:scale(0.97)} .nb:hover{background:rgba(255,255,255,0.08)!important}
+        input,select,textarea{font-size:16px!important}
+        @media(max-width:768px){
+          .hide-mobile{display:none!important}
+          table{font-size:11px!important}
+          h2{font-size:16px!important}
+          .main-wrap{padding:10px 10px 80px!important;margin-top:52px!important}
+          .sidebar-wrap{position:fixed!important;bottom:0!important;left:0!important;right:0!important;top:auto!important;width:100%!important;height:auto!important;flex-direction:row!important;overflow-x:auto!important;overflow-y:hidden!important;z-index:500!important;padding:6px 4px max(8px,env(safe-area-inset-bottom))!important;border-top:1px solid rgba(255,255,255,0.1)!important;border-right:none!important;gap:2px!important;scrollbar-width:none!important}
+          .sidebar-wrap::-webkit-scrollbar{display:none}
+          .sidebar-section-label{display:none!important}
+          .mobile-header{display:flex!important}
+          .collapse-btn{display:none!important}
+        }
+        @media(min-width:769px){
+          .mobile-header{display:none!important}
+          .main-wrap{padding:24px!important}
+        }
+        @media(display-mode:standalone){
+          .mobile-header{padding-top:max(10px,env(safe-area-inset-top))!important}
+        }
       `}</style>
       <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
-        <div style={{width:collapsed?64:240,background:B.grad,display:"flex",flexDirection:"column",transition:"width 0.2s",flexShrink:0,overflow:"hidden"}}>
+        {/* Mobile top header */}
+        <div className="mobile-header" style={{position:"fixed",top:0,left:0,right:0,zIndex:600,background:B.dark,padding:"10px 16px",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:28,height:28,borderRadius:7,background:B.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:13}}>B</div>
+            <span style={{color:"#fff",fontWeight:800,fontSize:14}}>BnB CRM</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>{currentUser.name}</span>
+          </div>
+        </div>
+        <div className="sidebar-wrap" style={{width:collapsed?64:240,background:B.grad,display:"flex",flexDirection:"column",transition:"width 0.2s",flexShrink:0,overflow:"hidden"}}>
           <div style={{padding:collapsed?"16px 14px":"20px 18px 16px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
             {!collapsed?(
               <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -4731,7 +4785,7 @@ export default function App() {
             {overdueCount>0&&<button onClick={()=>setShowReminderPopup(p=>!p)} style={{background:"#fee2e2",border:"1px solid #dc2626",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7f1d1d",fontWeight:700,cursor:"pointer"}}>🔔 {overdueCount} task{overdueCount>1?"s":""} overdue</button>}
             {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
           </div>
-          <div style={{flex:1,overflowY:"auto",padding:"24px 28px 60px"}}>
+          <div className="main-wrap" style={{flex:1,overflowY:"auto",padding:"24px 28px 60px"}}>
             <div style={{width:"100%"}}>{renderPage()}</div>
           </div>
         </div>
