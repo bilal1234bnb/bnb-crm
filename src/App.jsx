@@ -3812,6 +3812,7 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           list:"ACL",
           university:client.university,
           intake:client.intake,
+          stage:client.processing_stage,
           processing_stage:client.processing_stage,
           portal:client.portal,
           b2b_b2c:client.b2b_b2c,
@@ -3830,6 +3831,11 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           remarks:client.process_notes,
           status:"Active",
           lost:false,
+          score:3,
+          consultation_done:true,
+          agreement_signed:true,
+          payment_received:true,
+          invoice_generated:true,
           created_at:new Date().toISOString(),
         };
         await leadsDB.insert(leadData);
