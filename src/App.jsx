@@ -678,7 +678,7 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
   const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:""});
   const [form,setForm]=useState({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
   // ALL users see ALL tasks — but filtered by tab
-  const [taskTab,setTaskTab]=useState("mine");
+  const [taskTab,setTaskTab]=useState(currentUser.role===ROLES.CEO?"all":"mine");
   const allOpen=tasks.filter(t=>!t.done).sort((a,b)=>{if(a.due_date<tod()&&b.due_date>=tod())return -1;if(b.due_date<tod()&&a.due_date>=tod())return 1;return(a.due_date||"").localeCompare(b.due_date||"");});
   const myOpen=allOpen.filter(t=>t.assigned_to===currentUser.id);
   const teamOpen=allOpen.filter(t=>t.assigned_to!==currentUser.id);
@@ -764,12 +764,26 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{t.title}{t.auto_generated&&<span style={{fontSize:10,color:"#9fa8da",marginLeft:6}}>🤖</span>}</div>
-                      <div style={{fontSize:11,color:"#9fa8da",marginTop:2,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                        {t.client_name&&<span style={{fontWeight:600,color:"#5c6bc0"}}>{t.client_name} · </span>}
-                        <span style={{color:od?"#dc2626":"#9fa8da",fontWeight:od?700:400}}>{od?`⚠️ Overdue since ${t.due_date}`:`Due: ${t.due_date||"—"}`}</span>
-                        {/* Assigned person badge */}
-                        {(()=>{const assignee=users.find(u=>u.id===t.assigned_to);return assignee?<span style={{background:assignee.id===currentUser.id?"#e8eaf6":"#f3e8ff",color:assignee.id===currentUser.id?"#3949ab":"#7c3aed",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>👤 {assignee.name}</span>:null;})()}
-                        {!canEdit(t)&&<span style={{background:"#fee2e2",color:"#dc2626",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>🔒 View only</span>}
+                      <div style={{fontSize:11,color:"#9fa8da",marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                        {t.client_name&&<span style={{fontWeight:700,color:"#3949ab",background:"#eef0fb",borderRadius:20,padding:"1px 8px"}}>{t.client_name}</span>}
+                        {/* Assigned counselor badge */}
+                        {(()=>{
+                          const assignee=users.find(u=>u.id===t.assigned_to);
+                          return assignee?<span style={{background:assignee.id===currentUser.id?"#d1fae5":"#f3e8ff",color:assignee.id===currentUser.id?"#065f46":"#7c3aed",borderRadius:20,padding:"2px 9px",fontSize:11,fontWeight:700}}>👤 {assignee.name}</span>:null;
+                        })()}
+                        {/* Due date / overdue days */}
+                        {(()=>{
+                          if(!t.due_date)return <span style={{fontSize:11,color:"#9fa8da"}}>No due date</span>;
+                          const due=new Date(t.due_date);
+                          const today=new Date(tod());
+                          const diffDays=Math.floor((today-due)/(1000*60*60*24));
+                          if(diffDays>0)return <span style={{background:"#fee2e2",color:"#dc2626",borderRadius:20,padding:"2px 9px",fontSize:11,fontWeight:800}}>⚠️ {diffDays} day{diffDays>1?"s":""} overdue</span>;
+                          if(diffDays===0)return <span style={{background:"#fef3c7",color:"#7c5100",borderRadius:20,padding:"2px 9px",fontSize:11,fontWeight:700}}>📅 Due today</span>;
+                          return <span style={{background:"#f0f9ff",color:"#0369a1",borderRadius:20,padding:"2px 9px",fontSize:11,fontWeight:600}}>📅 Due {t.due_date} ({Math.abs(diffDays)}d left)</span>;
+                        })()}
+                        {/* Date assigned */}
+                        {t.created_at&&<span style={{fontSize:10,color:"#9fa8da"}}>Assigned: {t.created_at?.split("T")[0]}</span>}
+                        {!canEdit(t)&&<span style={{background:"#f3f4f9",color:"#94a3b8",borderRadius:20,padding:"1px 8px",fontSize:10}}>🔒 View only</span>}
                       </div>
                     </div>
                     <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
