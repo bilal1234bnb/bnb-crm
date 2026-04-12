@@ -887,64 +887,6 @@ This will move the lead to Closed Leads list.`))saveOutcome(true);}} style={{...
 }
 
 // ─── INVOICES ────────────────────────────────────────────────────────────────
-function Invoices({invoices,invoicesDB,leads,currentUser}) {
-  const [showAdd,setShowAdd]=useState(false);
-  const [form,setForm]=useState({client_name:"",service:"",amount:"",paid:0,invoice_date:tod(),due_date:"",account_code:"4100"});
-  if(currentUser.role!==ROLES.CEO&&currentUser.role!==ROLES.ACCOUNTS)return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO and Accounts only.</div>;
-  const total=invoices.reduce((a,i)=>a+(i.amount||0),0);
-  const collected=invoices.reduce((a,i)=>a+(i.paid||0),0);
-  const aging={"0–30":0,"31–60":0,"61–90":0,"90+":0};
-  invoices.filter(i=>i.status!=="Paid").forEach(inv=>{const days=Math.floor((new Date()-new Date(inv.due_date))/86400000);const bal=(inv.amount||0)-(inv.paid||0);if(days<=30)aging["0–30"]+=bal;else if(days<=60)aging["31–60"]+=bal;else if(days<=90)aging["61–90"]+=bal;else aging["90+"]+=bal;});
-  const add=async()=>{
-    if(!form.client_name||!form.amount)return;
-    const amt=+form.amount,paid=+form.paid;
-    await invoicesDB.insert({...form,amount:amt,paid,status:paid===0?"Unpaid":paid>=amt?"Paid":"Partial",created_by:currentUser.id});
-    setShowAdd(false);setForm({client_name:"",service:"",amount:"",paid:0,invoice_date:tod(),due_date:"",account_code:"4100"});
-  };
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <div><h2 style={S.h2}>Invoices & Payments</h2><p style={S.sub}>{invoices.length} invoices</p></div>
-        {currentUser.role===ROLES.CEO&&<button style={S.btn("#dc2626")} onClick={()=>setShowAdd(true)}>+ New Invoice</button>}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:20}}>
-        <Stat label="Total Billed" value={fmt(total)} color={B.dark}/><Stat label="Collected" value={fmt(collected)} color={B.success}/><Stat label="Outstanding" value={fmt(total-collected)} color="#dc2626"/>
-      </div>
-      <div style={{...S.card,marginBottom:20}}>
-        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>Accounts Receivable Aging</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-          {Object.entries(aging).map(([range,amt])=>(
-            <div key={range} style={{background:"#f8f9ff",borderRadius:10,padding:14,textAlign:"center",borderLeft:`3px solid ${range==="90+"?"#dc2626":range==="61–90"?"#d97706":range==="31–60"?"#f0b429":"#059669"}`}}>
-              <div style={{fontSize:11,color:"#9fa8da",fontWeight:700,textTransform:"uppercase",marginBottom:6}}>{range} days</div>
-              <div style={{fontSize:18,fontWeight:800,color:range==="90+"?"#dc2626":B.dark}}>{fmt(amt)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div style={S.card}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>{["Client","Service","Billed","Paid","Balance","Due","Status"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {invoices.map(inv=>{const bal=(inv.amount||0)-(inv.paid||0);const[sc,sb]={Paid:["#065f46","#d1fae5"],Partial:["#7c5100","#fef3c7"],Unpaid:["#9b1c1c","#fee2e2"]}[inv.status]||["#37474f","#f3f4f9"];return(
-              <tr key={inv.id}><td style={S.td}><div style={{fontWeight:700}}>{inv.client_name}</div></td><td style={S.td}>{inv.service}</td><td style={S.td}>{fmt(inv.amount)}</td><td style={{...S.td,color:B.success,fontWeight:700}}>{fmt(inv.paid)}</td><td style={{...S.td,color:bal>0?"#dc2626":B.success,fontWeight:700}}>{fmt(bal)}</td><td style={S.td}>{inv.due_date}</td><td style={S.td}><Pill text={inv.status} color={sc} bg={sb}/></td></tr>
-            );})}
-          </tbody>
-        </table>
-        {invoices.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No invoices yet.</div>}
-      </div>
-      {showAdd&&(
-        <Modal title="New Invoice" onClose={()=>setShowAdd(false)}>
-          <Fld label="Client"><select style={S.sel} value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})}><option value="">-- ACL Client --</option>{leads.filter(l=>l.list==="ACL").map(l=><option key={l.id}>{l.name}</option>)}</select></Fld>
-          <Fld label="Service"><input style={S.inp} value={form.service} onChange={e=>setForm({...form,service:e.target.value})}/></Fld>
-          <R2><Fld label="Total (PKR)"><input type="number" style={S.inp} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></Fld><Fld label="Paid (PKR)"><input type="number" style={S.inp} value={form.paid} onChange={e=>setForm({...form,paid:e.target.value})}/></Fld></R2>
-          <R2><Fld label="Invoice Date"><input type="date" style={S.inp} value={form.invoice_date} onChange={e=>setForm({...form,invoice_date:e.target.value})}/></Fld><Fld label="Due Date"><input type="date" style={S.inp} value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Fld></R2>
-          <button onClick={add} style={{...S.btn("#dc2626"),width:"100%",justifyContent:"center",padding:12}}>Create Invoice</button>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
 // ─── FULL ACCOUNTING MODULE ───────────────────────────────────────────────────
 function Accounting({accounts,accountsDB,journals,journalsDB,bankTx,bankTxDB,subAccounts,subAccountsDB,invoices,currentUser}) {
   const [tab,setTab]=useState("dashboard");
