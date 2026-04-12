@@ -3162,7 +3162,11 @@ function Attendance({users,currentUser}) {
   const [selDate,setSelDate]=useState(tod());
   const [filterBranch,setFilterBranch]=useState(currentUser.branch||"Lahore (HQ)");
 
-  const canMark=currentUser.role===ROLES.CEO||currentUser.role===ROLES.BRANCH_MANAGER;
+  const canMark=(date)=>{
+    if(currentUser.role===ROLES.CEO) return true; // CEO can edit any date
+    if(date<tod()) return false; // Others cannot edit past dates
+    return currentUser.role===ROLES.BRANCH_MANAGER;
+  };
   const staff=users.filter(u=>u.active&&u.role!==ROLES.CEO&&(!filterBranch||u.branch===filterBranch));
   const todayAtt=attDB.data.filter(a=>a.date===selDate&&(!filterBranch||a.branch===filterBranch));
 
@@ -3179,9 +3183,47 @@ function Attendance({users,currentUser}) {
   const [viewMonth,setViewMonth]=useState(tod().slice(0,7));
   const monthAtt=attDB.data.filter(a=>a.date?.startsWith(viewMonth)&&(!filterBranch||a.branch===filterBranch));
 
+  const [showBulk,setShowBulk]=useState(false);
+  const [bulkFrom,setBulkFrom]=useState("");
+  const [bulkTo,setBulkTo]=useState(tod());
+  const [bulkDefaults,setBulkDefaults]=useState({});
+  const [bulkSaving,setBulkSaving]=useState(false);
+
+  const saveBulkAttendance=async()=>{
+    if(!bulkFrom||!bulkTo)return alert("Please select date range");
+    if(staff.length===0)return alert("No staff found");
+    setBulkSaving(true);
+    // Generate all dates in range
+    const dates=[];
+    let d=new Date(bulkFrom);
+    const end=new Date(bulkTo);
+    while(d<=end){
+      dates.push(d.toISOString().slice(0,10));
+      d.setDate(d.getDate()+1);
+    }
+    // For each date and staff, insert if not exists
+    for(const date of dates){
+      for(const u of staff){
+        const status=bulkDefaults[u.id]||"Present";
+        const existing=attDB.data.find(a=>a.user_id===u.id&&a.date===date);
+        if(!existing){
+          await attDB.insert({user_id:u.id,user_name:u.name,date,status,branch:filterBranch,marked_by:currentUser.name+"(bulk)"});
+        }
+      }
+    }
+    setBulkSaving(false);
+    setShowBulk(false);
+    alert(`✅ Attendance filled for ${dates.length} days × ${staff.length} staff`);
+  };
+
   return (
     <div>
-      <div style={{marginBottom:18}}><h2 style={S.h2}>Attendance</h2><p style={S.sub}>Daily attendance · 10AM–6PM</p></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><h2 style={S.h2}>Attendance</h2><p style={S.sub}>Daily attendance · 10AM–6PM</p></div>
+        {currentUser.role===ROLES.CEO&&(
+          <button onClick={()=>setShowBulk(true)} style={{...S.btn(B.warn),fontSize:12}}>📅 Fill Past Attendance</button>
+        )}
+      </div>
 
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
         <input type="date" style={{...S.inp,width:160,margin:0}} value={selDate} onChange={e=>setSelDate(e.target.value)}/>
@@ -3192,8 +3234,17 @@ function Attendance({users,currentUser}) {
 
       {/* Mark Attendance */}
       <div style={{...S.card,marginBottom:20}}>
-        <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:14}}>
-          Mark Attendance — {selDate} {selDate===tod()&&<span style={{background:"#d1fae5",color:"#065f46",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,marginLeft:8}}>Today</span>}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:B.dark}}>
+            Mark Attendance — {selDate}
+            {selDate===tod()&&<span style={{background:"#d1fae5",color:"#065f46",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,marginLeft:8}}>Today</span>}
+            {selDate<tod()&&<span style={{background:"#fef3c7",color:"#7c5100",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,marginLeft:8}}>Past Date</span>}
+          </div>
+          {currentUser.role===ROLES.CEO&&selDate<tod()&&(
+            <div style={{fontSize:11,color:"#7c5100",background:"#fef3c7",borderRadius:8,padding:"4px 10px"}}>
+              🔐 CEO editing past attendance
+            </div>
+          )}
         </div>
         {staff.length===0&&<div style={{color:"#9fa8da",textAlign:"center",padding:20}}>No staff in this branch.</div>}
         {staff.map(u=>{
@@ -3206,13 +3257,51 @@ function Attendance({users,currentUser}) {
               </div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {ATTENDANCE_STATUS.map(s=>(
-                  <button key={s} onClick={()=>canMark&&markAtt(u.id,u.name,s)} style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${st===s?(statusColors[s]||["#37474f"])[0]:"#e8eaf6"}`,background:st===s?(statusColors[s]||["#37474f","#f3f4f9"])[1]:"#fff",color:st===s?(statusColors[s]||["#37474f"])[0]:"#9fa8da",fontSize:11,fontWeight:st===s?700:400,cursor:canMark?"pointer":"default"}}>{s}</button>
+                  <button key={s} onClick={()=>canMark(selDate)&&markAtt(u.id,u.name,s)} style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${st===s?(statusColors[s]||["#37474f"])[0]:"#e8eaf6"}`,background:st===s?(statusColors[s]||["#37474f","#f3f4f9"])[1]:"#fff",color:st===s?(statusColors[s]||["#37474f"])[0]:"#9fa8da",fontSize:11,fontWeight:st===s?700:400,cursor:canMark(selDate)?"pointer":"default"}}>{s}</button>
                 ))}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Bulk Past Attendance Modal */}
+      {showBulk&&(
+        <Modal title="📅 Fill Past Attendance (Bulk)" onClose={()=>setShowBulk(false)} w={560}>
+          <div style={{background:"#fef3c7",borderRadius:10,padding:14,marginBottom:16,fontSize:12,color:"#7c5100"}}>
+            ⚠️ This will fill attendance for all staff in <strong>{filterBranch}</strong> for the selected date range. Only dates with <strong>no existing record</strong> will be filled — existing records are never overwritten.
+          </div>
+          <R2>
+            <Fld label="From Date"><input type="date" style={S.inp} value={bulkFrom} onChange={e=>setBulkFrom(e.target.value)}/></Fld>
+            <Fld label="To Date"><input type="date" style={S.inp} value={bulkTo} onChange={e=>setBulkTo(e.target.value)} max={tod()}/></Fld>
+          </R2>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Default Status Per Staff Member</div>
+            <div style={{fontSize:11,color:"#9fa8da",marginBottom:10}}>Set the default status for each person for the entire range. You can then go back and edit individual days.</div>
+            {staff.map(u=>(
+              <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f9"}}>
+                <div style={{fontWeight:700,fontSize:13,color:B.dark,minWidth:140}}>{u.name}</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {["Present","Absent","Late","Half Day","Leave"].map(s=>(
+                    <button key={s} onClick={()=>setBulkDefaults({...bulkDefaults,[u.id]:s})}
+                      style={{padding:"4px 10px",borderRadius:8,border:`2px solid ${(bulkDefaults[u.id]||"Present")===s?"#2d3a8c":"#e8eaf6"}`,background:(bulkDefaults[u.id]||"Present")===s?"#eef0fb":"#fff",color:(bulkDefaults[u.id]||"Present")===s?"#2d3a8c":"#9fa8da",fontSize:11,fontWeight:(bulkDefaults[u.id]||"Present")===s?700:400,cursor:"pointer"}}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {bulkFrom&&bulkTo&&(
+            <div style={{background:"#f0f9ff",borderRadius:8,padding:12,marginBottom:14,fontSize:12,color:"#0369a1"}}>
+              📊 Will fill <strong>{Math.ceil((new Date(bulkTo)-new Date(bulkFrom))/(1000*60*60*24))+1} days</strong> × <strong>{staff.length} staff members</strong> = up to <strong>{(Math.ceil((new Date(bulkTo)-new Date(bulkFrom))/(1000*60*60*24))+1)*staff.length} records</strong>
+            </div>
+          )}
+          <button onClick={saveBulkAttendance} disabled={bulkSaving} style={{...S.btn(bulkSaving?"#9fa8da":B.success),width:"100%",justifyContent:"center",padding:12}}>
+            {bulkSaving?"⏳ Saving... please wait...":"✅ Save Bulk Attendance"}
+          </button>
+        </Modal>
+      )}
 
       {/* Monthly Summary */}
       <div style={{...S.card}}>
@@ -3589,6 +3678,26 @@ function InvoiceTemplateDesigner({currentUser,settings,settingsDB}) {
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={S.card}>
             <div style={{fontSize:13,fontWeight:700,color:B.dark,marginBottom:12}}>Company Details</div>
+            {/* Logo Upload */}
+            <Fld label="Company Logo">
+              <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}>
+                {tmpl.logo&&<img src={tmpl.logo} alt="Logo" style={{height:50,maxWidth:150,objectFit:"contain",border:"1px solid #e8eaf6",borderRadius:8,padding:4}}/>}
+                {!tmpl.logo&&<div style={{width:80,height:50,background:"#f8f9ff",border:"2px dashed #c5cae9",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#9fa8da"}}>No Logo</div>}
+                <div>
+                  <input type="file" accept="image/*" id="logo-upload" style={{display:"none"}} onChange={e=>{
+                    const file=e.target.files[0];
+                    if(!file)return;
+                    if(file.size>500000){alert("Logo file too large. Please use an image under 500KB.");return;}
+                    const reader=new FileReader();
+                    reader.onload=ev=>setTmpl({...tmpl,logo:ev.target.result});
+                    reader.readAsDataURL(file);
+                  }}/>
+                  <label htmlFor="logo-upload" style={{...S.btn(B.primary),fontSize:11,padding:"6px 14px",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4}}>📁 Upload Logo</label>
+                  {tmpl.logo&&<button onClick={()=>setTmpl({...tmpl,logo:""})} style={{...S.ghost,fontSize:11,padding:"5px 10px",marginLeft:8,color:"#dc2626",borderColor:"#dc2626"}}>Remove</button>}
+                </div>
+              </div>
+              <div style={{fontSize:10,color:"#9fa8da"}}>PNG, JPG or SVG · Max 500KB · Recommended: transparent PNG</div>
+            </Fld>
             <Fld label="Company Name"><input style={S.inp} value={tmpl.company||""} onChange={e=>setTmpl({...tmpl,company:e.target.value})} placeholder="Border and Bridges Pvt. Ltd."/></Fld>
             <Fld label="Address"><input style={S.inp} value={tmpl.address||""} onChange={e=>setTmpl({...tmpl,address:e.target.value})} placeholder="Office address"/></Fld>
             <Fld label="Phone"><input style={S.inp} value={tmpl.phone||""} onChange={e=>setTmpl({...tmpl,phone:e.target.value})} placeholder="+92 42 XXXXXXX"/></Fld>
@@ -3624,6 +3733,7 @@ function InvoiceTemplateDesigner({currentUser,settings,settingsDB}) {
           <div style={{border:"1px solid #e8eaf6",borderRadius:8,overflow:"hidden",fontSize:11}}>
             {/* Header */}
             <div style={{background:tmpl.primary_color||B.primary,padding:"16px 20px",color:"#fff",textAlign:tmpl.logo_position==="Center"?"center":tmpl.logo_position==="Right"?"right":"left"}}>
+              {tmpl.logo&&<img src={tmpl.logo} alt="Logo" style={{height:40,maxWidth:120,objectFit:"contain",marginBottom:8,display:"block",margin:tmpl.logo_position==="Center"?"0 auto 6px":tmpl.logo_position==="Right"?"0 0 6px auto":"0 0 6px 0"}}/>}
               <div style={{fontSize:16,fontWeight:900}}>{tmpl.company||"Border and Bridges Pvt. Ltd."}</div>
               <div style={{opacity:0.8,marginTop:2}}>{tmpl.address||"Lahore, Pakistan"}</div>
               <div style={{opacity:0.8}}>{tmpl.phone||""} {tmpl.email||""}</div>
