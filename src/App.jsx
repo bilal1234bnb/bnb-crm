@@ -2633,7 +2633,7 @@ function Invoices({invoices,invoicesDB,leads,agents,currentUser,settings}) {
     <div class="row"><span class="label">Client</span><span class="value">${inv.client_name}</span></div>
     <div class="row"><span class="label">Payment Date</span><span class="value">${payment.date}</span></div>
     <div class="row"><span class="label">Payment Method</span><span class="value">${payment.method}</span></div>
-    ${payment.reference?`<div class="row"><span class="label">Reference</span><span class="value">${payment.reference}</span></div>`:""}
+    ${payment.reference?'<div class="row"><span class="label">Reference</span><span class="value">'+payment.reference+'</span></div>':""}
     <div class="amount">PKR ${parseFloat(payment.amount).toLocaleString()}</div>
     <div class="row"><span class="label">Total Invoice</span><span class="value">PKR ${lineTotal(inv.line_items||[]).toLocaleString()}</span></div>
     <div class="row"><span class="label">Total Paid</span><span class="value">PKR ${(totalPaid(inv)).toLocaleString()}</span></div>
