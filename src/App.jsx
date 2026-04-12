@@ -3788,6 +3788,11 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
   const [progress,setProgress]=useState(0);
   const [results,setResults]=useState([]);
   const [preview,setPreview]=useState(true);
+  // Check if already imported - compare ACL_DATA names against existing leads
+  const alreadyImportedCount = leadsDB.data?.filter(l =>
+    l.list==="ACL" && ACL_DATA.some(c => c.name.toLowerCase().trim() === l.name?.toLowerCase().trim())
+  ).length || 0;
+  const pendingCount = ACL_DATA.length - alreadyImportedCount;
 
   if(currentUser.role!==ROLES.CEO)
     return <div style={{...S.card,textAlign:"center",padding:60,color:"#9fa8da"}}>🔒 CEO only.</div>;
@@ -3795,13 +3800,33 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
   const runImport=async()=>{
     if(!window.confirm(`Import ${ACL_DATA.length} ACL clients from Excel?\n\nThis will add them to your Active Clients list with their processing stages.`))return;
     setStatus("running");setProgress(0);setResults([]);
+
+    // Pre-flight: ensure all required columns exist by upserting a test record
+    // This is handled by Supabase — columns added via SQL schema already
+    // But we do a pre-check insert to catch any column errors early
+    try {
+      const testCheck = await supabase.from("leads").select("university,intake,processing_stage,portal,b2b_b2c,source_type,external_agent_name,referred_by_staff,original_source,staff_commission_pkr,agent_commission_pct,conditions,app_receive_date,offer_date,admission_sent_date,counselor_notes,todo,case_log,universities").limit(1);
+      if(testCheck.error && testCheck.error.message.includes("column")) {
+        // Try to add columns dynamically via a safe insert pattern
+        alert("⚠️ Some database columns are missing. Please run the SQL setup first:\n\nGo to Supabase → SQL Editor → paste the setup SQL → Run\n\nThen try importing again.");
+        setStatus("idle");
+        return;
+      }
+    } catch(e) {}
+
     const logs=[];
     for(let i=0;i<ACL_DATA.length;i++){
       const client=ACL_DATA[i];
       setProgress(Math.round((i/ACL_DATA.length)*100));
       try{
         // Check if already exists
-        const existing=leadsDB.data?.find(l=>l.name?.toLowerCase()===client.name.toLowerCase()&&l.list==="ACL");
+        // Case-insensitive duplicate check by name OR phone
+        const clientNameLower = client.name.toLowerCase().trim();
+        const existing = leadsDB.data?.find(l =>
+          l.list === "ACL" && !l.lost &&
+          (l.name?.toLowerCase().trim() === clientNameLower ||
+           (client.phone && l.phone && l.phone.trim() === client.phone.trim()))
+        );
         if(existing){logs.push({name:client.name,status:"skipped",reason:"Already exists"});continue;}
         
         const leadData={
@@ -3887,16 +3912,19 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
       {/* Stats */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
         <Stat label="Total Clients" value={ACL_DATA.length} color={B.primary} icon="👥"/>
+        <Stat label="Already Imported" value={alreadyImportedCount} color={B.success} icon="✅"/>
+        <Stat label="Pending Import" value={pendingCount} color={pendingCount>0?B.warn:"#9fa8da"} icon="⏳"/>
         <Stat label="External Agent" value={ACL_DATA.filter(c=>c.source_type==="external_agent").length} color={B.secondary} icon="🤝"/>
         <Stat label="Staff Referral" value={ACL_DATA.filter(c=>c.source_type==="internal_staff").length} color={"#7c3aed"} icon="👤"/>
-        <Stat label="Direct/BNB" value={ACL_DATA.filter(c=>c.source_type==="direct").length} color={B.success} icon="🏢"/>
       </div>
 
       {preview&&status==="idle"&&(
         <div style={{...S.card,marginBottom:20}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:700,color:B.dark}}>Preview — All 56 clients</div>
-            <button onClick={runImport} style={{...S.btn(B.success),fontSize:13}}>✅ Import All to ACL</button>
+            <button onClick={runImport} style={{...S.btn(pendingCount===0?"#9fa8da":B.success),fontSize:13}} disabled={pendingCount===0}>
+              {pendingCount===0?"✅ All Imported":` Import ${pendingCount} to ACL`}
+            </button>
           </div>
           <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
