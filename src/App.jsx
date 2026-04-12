@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+ import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
 // ─── BRAND ───────────────────────────────────────────────────────────────────
