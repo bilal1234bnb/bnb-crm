@@ -143,6 +143,37 @@ const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c51
 const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
 const isMobile = () => window.innerWidth <= 768;
+
+// ── Toast Notification System ─────────────────────────────────
+const ToastContext = React.createContext(null);
+function ToastProvider({children}) {
+  const [toasts, setToasts] = useState([]);
+  const toast = (msg, type="success", duration=3000) => {
+    const id = Date.now();
+    setToasts(p => [...p, {id, msg, type}]);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), duration);
+  };
+  const colors = {success:"#065f46,#d1fae5",error:"#9b1c1c,#fee2e2",warn:"#7c5100,#fef3c7",info:"#1e40af,#dbeafe"};
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div style={{position:"fixed",bottom:24,right:24,zIndex:9999,display:"flex",flexDirection:"column",gap:8,maxWidth:320}}>
+        {toasts.map(t => {
+          const [color,bg] = (colors[t.type]||colors.success).split(",");
+          return (
+            <div key={t.id} style={{background:bg,border:`1px solid ${color}20`,borderLeft:`4px solid ${color}`,borderRadius:10,padding:"10px 16px",boxShadow:"0 4px 20px rgba(0,0,0,0.12)",fontSize:13,fontWeight:600,color,animation:"slideIn 0.25s ease",display:"flex",alignItems:"center",gap:8}}>
+              <span>{t.type==="success"?"✅":t.type==="error"?"❌":t.type==="warn"?"⚠️":"ℹ️"}</span>
+              <span style={{flex:1}}>{t.msg}</span>
+            </div>
+          );
+        })}
+      </div>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+    </ToastContext.Provider>
+  );
+}
+const useToast = () => React.useContext(ToastContext) || ((msg)=>console.log(msg));
+
 const useMobile = () => {
   const [mobile, setMobile] = useState(isMobile());
   useEffect(() => {
@@ -255,7 +286,7 @@ function useTable(tableName, options={}) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,users}) {
   const rev=invoices.reduce((a,i)=>a+(i.paid||0),0);
-  const pending=leads.filter(l=>l.pending_approval&&!l.approved);
+  const pending=leads.filter(l=>l.pending_approval&&!l.approved&&l.list==="GCL");
   const openT=tasks.filter(t=>!t.done);
   const overdue=tasks.filter(t=>!t.done&&t.due_date<tod());
   const won=leads.filter(l=>l.stage==="Visa WON"||l.stage==="Visa Approved").length;
@@ -292,18 +323,27 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,u
         <h2 style={S.h2}>Welcome, {currentUser.name} 👋</h2>
         <p style={S.sub}>Border and Bridges Pvt. Ltd. · {today}</p>
       </div>
-      {currentUser.role===ROLES.CEO&&pending.length>0&&<Alert type="warn" msg={`⚠️ ${pending.length} lead(s) pending your assignment`}/>}
-      {overdue.length>0&&<Alert type="error" msg={`🔴 ${overdue.length} task(s) are overdue`}/>}
+      {currentUser.role===ROLES.CEO&&pending.length>0&&<Alert type="warn" msg={`⚠️ ${pending.length} GCL lead(s) pending assignment`}/>}
+      {overdue.length>0&&<Alert type="error" msg={`🔴 ${overdue.length} task(s) overdue — action required`}/>}
+      {(()=>{
+        const idleLeads=leads.filter(l=>{
+          if(l.lost||l.list==="ACL")return false;
+          const lc=l.last_contact||l.created_at?.slice(0,10);
+          if(!lc)return false;
+          return Math.floor((new Date()-new Date(lc))/(1000*60*60*24))>=7;
+        });
+        return idleLeads.length>0&&<Alert type="warn" msg={`🔴 ${idleLeads.length} lead(s) with no contact in 7+ days — follow up needed`}/>;
+      })()}
 
       {/* KPI Cards */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:12,marginBottom:20}}>
         {[
-          {label:"Total Leads",value:leads.filter(l=>!l.lost).length,sub:`${leads.filter(l=>l.list==="ACL").length} active`,color:B.primary,icon:"👥",page:"leads"},
+          {label:"Total Leads",value:leads.filter(l=>!l.lost).length,sub:`${leads.filter(l=>l.list==="ACL"&&!l.lost).length} in ACL`,color:B.primary,icon:"👥",page:"leads"},
           {label:"Visa WON",value:won,sub:`${leads.filter(l=>l.stage==="Visa Rejected").length} rejected`,color:B.success,icon:"✈️",page:"reporting"},
           {label:"Collected",value:`PKR ${Math.round(rev/1000)||0}K`,color:B.secondary,icon:"💰",page:"invoices"},
           {label:"Open Tasks",value:openT.length,sub:`${overdue.length} overdue`,color:overdue.length>0?B.danger:B.warn,icon:"✅",page:"tasks"},
           {label:"Pending CEO",value:pending.length,color:"#7c3aed",icon:"⏳",page:"leads"},
-          {label:"Win Rate",value:leads.length>0?Math.round((won/leads.length)*100)+"%":"0%",color:B.accent,icon:"📈",page:"reporting"},
+          {label:"Win Rate",value:aclLeads.length>0?Math.round((won/aclLeads.length)*100)+"%":"0%",color:B.accent,icon:"📈",page:"reporting"},
           {label:"Today's Comms",value:todayNotes.length,sub:`${todayCalls.length} calls/msgs`,color:"#0891b2",icon:"📞",page:"reporting"},
           {label:"Active Cases",value:aclLeads.length,sub:"ACL clients",color:"#7c3aed",icon:"📋",page:"cases"},
         ].map(({label,value,sub,color,icon,page:pg})=>(
@@ -436,7 +476,9 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,u
 }
 
 function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) {
+  const toast=useToast();
   const [tab,setTab]=useState("GCL");
+  const changeTab=(t)=>{setTab(t);setCurrentPage(1);};
   const [showAdd,setShowAdd]=useState(false);
   const [sel,setSel]=useState(null);
   const [leadTab,setLeadTab]=useState("overview");
@@ -448,6 +490,8 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const [selected,setSelected]=useState(new Set());
   const [batchAssignee,setBatchAssignee]=useState("");
   const [showBatchBar,setShowBatchBar]=useState(false);
+  const [currentPage,setCurrentPage]=useState(1);
+  const PAGE_SIZE=50;
   const sources=settings?.lead_sources?JSON.parse(settings.lead_sources):LEAD_SOURCES_DEFAULT;
   const EF={name:"",phone:"",email:"",country:"🇬🇧 UK",source:sources[0]||"Other",branch:currentUser.branch,type:"B2C",last_qualification:"",last_qualification_year:"",ielts_score:"",intake_target:"",issue:"",status:"New",remarks:"",reminder1:"",reminder2:"",reminder3:"",enquiry_date:tod()};
   const [form,setForm]=useState(EF);
@@ -466,15 +510,32 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
     }
     return list;
   },[leads,tab,currentUser,search]);
+  const totalPages = Math.ceil(filtered.length/PAGE_SIZE);
+  const paginated = filtered.slice((currentPage-1)*PAGE_SIZE, currentPage*PAGE_SIZE);
 
-  const pending=leads.filter(l=>l.pending_approval&&!l.approved);
-  const counselors=users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active);
+  const pending=leads.filter(l=>l.pending_approval&&!l.approved&&l.list==="GCL");
+  const counselors=useMemo(()=>users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active),[users]);
 
   const isReminderDue=(r)=>r&&r<=tod();
   const rowHighlight=(lead)=>{
-    if(tab!=="PCL")return {};
-    const due=[lead.reminder1,lead.reminder2,lead.reminder3].some(r=>isReminderDue(r));
-    return due?{background:"#fff3cd",borderLeft:"4px solid #f0b429"}:{};
+    // PCL reminders
+    if(tab==="PCL"){
+      const due=[lead.reminder1,lead.reminder2,lead.reminder3].some(r=>isReminderDue(r));
+      if(due) return {background:"#fff3cd",borderLeft:"4px solid #f0b429"};
+    }
+    // Idle detection - no contact in 7+ days (all lists)
+    const lastContact=lead.last_contact||lead.created_at?.slice(0,10);
+    if(lastContact){
+      const daysSince=Math.floor((new Date()-new Date(lastContact))/(1000*60*60*24));
+      if(daysSince>=7&&lead.list==="GCL") return {background:"#fff1f2",borderLeft:"4px solid #fca5a5"};
+    }
+    return {};
+  };
+  const getIdleWarning=(lead)=>{
+    const lastContact=lead.last_contact||lead.created_at?.slice(0,10);
+    if(!lastContact) return null;
+    const daysSince=Math.floor((new Date()-new Date(lastContact))/(1000*60*60*24));
+    return daysSince>=7?daysSince:null;
   };
 
   // Batch selection helpers
@@ -536,6 +597,9 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 
   const addLead=async()=>{
     if(!form.name||!form.phone)return;
+    // Duplicate check
+    const dup=leads.find(l=>l.name.toLowerCase().trim()===form.name.toLowerCase().trim()&&!l.lost);
+    if(dup&&!window.confirm(`⚠️ "${form.name}" already exists in ${dup.list}. Add anyway?`))return;
     const nl={...form,list:"GCL",stage:"New Enquiry",score:3,consultation_done:false,agreement_signed:false,payment_received:false,invoice_generated:false,all_doc_received:false,pending_approval:currentUser.role!==ROLES.CEO,approved:currentUser.role===ROLES.CEO,lost:false,last_contact:tod(),notes:[],docs:{},ielts_score:form.ielts_score||null,intake_target:form.intake_target||null,agent_id:form.agent_id||null,enquiry_date:form.enquiry_date||tod()};
     const saved=await leadsDB.insert(nl);
     if(saved)await tasksDB.insert({title:`Follow up: ${form.name} (2-day auto)`,client_name:form.name,lead_id:saved.id,assigned_to:currentUser.id,due_date:addDays(tod(),2),priority:"High",type:"Follow-up",auto_generated:true});
@@ -543,8 +607,12 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   };
   const assign=async(lead,uid)=>await leadsDB.update(lead.id,{assigned_to:uid,approved:true,pending_approval:false});
   const moveList=async(lead,nl)=>{
-    if((nl==="PCL"||nl==="BCL")&&!lead.consultation_done){alert("⛔ Complete consultation first.");return;}
-    if(nl==="ACL"){const miss=[];if(!lead.consultation_done)miss.push("Consultation Done");if(!lead.agreement_signed)miss.push("Agreement Signed");if(!lead.payment_received)miss.push("Payment Received");if(!lead.invoice_generated)miss.push("Invoice Generated");if(miss.length){alert("⛔ Cannot move to ACL.\nMissing:\n• "+miss.join("\n• "));return;}}
+    if((nl==="PCL"||nl==="BCL")&&!lead.consultation_done){toast("⛔ Complete consultation first.","error");return;}
+    // Auto-create follow-up task on list move
+    setTimeout(async()=>{
+      try{await tasksDB.insert({title:`${lead.name} → ${nl}: Initial follow-up required`,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to||currentUser.id,due_date:addDays(tod(),1),priority:"High",type:"Follow-up",auto_generated:true});}catch(e){}
+    },500);
+    if(nl==="ACL"){const miss=[];if(!lead.consultation_done)miss.push("Consultation Done");if(!lead.agreement_signed)miss.push("Agreement Signed");if(!lead.payment_received)miss.push("Payment Received");if(!lead.invoice_generated)miss.push("Invoice Generated");if(miss.length){toast("⛔ Cannot move to ACL.\nMissing:\n• "+miss.join("\n• "));return;}}
     await leadsDB.update(lead.id,{list:nl});setSel(null);
   };
   const addNote=async(lead)=>{
@@ -590,6 +658,12 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
             </button>
           ))}
         </div>
+        <button onClick={()=>{
+          const cols=["Name","Phone","Email","Country","Source","Stage","Status","Branch","Counselor","Created"];
+          const rows=filtered.map(l=>[l.name,l.phone||"",l.email||"",l.country||"",l.source||"",l.stage||"",l.status||"",l.branch||"",(users||[]).find(u=>u.id===l.assigned_to)?.name||"",l.created_at?.slice(0,10)||""]);
+          const csv=[cols,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+          const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`leads-${tab}-${tod()}.csv`;a.click();
+        }} style={{...S.ghost,fontSize:11,padding:"6px 12px",whiteSpace:"nowrap",flexShrink:0}}>📥 Export CSV</button>
         <input style={{...S.inp,width:220,margin:0}} placeholder="🔍 Search name, phone, country…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
 
@@ -659,13 +733,39 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder2)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder2)?700:400}}>{lead.reminder2||"—"}</td>
                     <td style={{...S.td,fontSize:11,color:isReminderDue(lead.reminder3)?"#dc2626":"#37474f",fontWeight:isReminderDue(lead.reminder3)?700:400}}>{lead.reminder3||"—"}</td>
                   </>}
-                  <td style={{...S.td,whiteSpace:"nowrap"}}><button onClick={()=>{setSel({...lead});setLeadTab("overview");}} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>Open</button></td>
+                  <td style={{...S.td,whiteSpace:"nowrap"}}>
+                    <div style={{display:"flex",gap:3,marginBottom:3}}>
+                      {["📞","💬","🚶"].map((icon,i)=>{
+                        const types=["Call","WhatsApp","Walk-in"];
+                        return <button key={i} title={`Quick log: ${types[i]}`} onClick={async(e)=>{
+                          e.stopPropagation();
+                          const note={id:Date.now(),text:`${types[i]} with client`,by:currentUser.name,at:new Date().toLocaleString(),type:types[i],date:tod()};
+                          const updated=[...(lead.notes||[]),note];
+                          await leadsDB.update(lead.id,{notes:updated,last_contact:tod()});
+                        }} style={{background:"#f0f4ff",border:"1px solid #e8eaf6",borderRadius:6,padding:"2px 5px",fontSize:12,cursor:"pointer"}}>{icon}</button>;
+                      })}
+                    </div>
+                    <button onClick={()=>{setSel({...lead});setLeadTab("overview");}} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>Open</button></td>
                 </tr>
               );
             })}
           </tbody>
         </table>
         {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No leads in {tab}{search?` matching "${search}"`:""}.</div>}
+          {totalPages>1&&(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderTop:"1px solid #e8eaf6",background:"#fafbff"}}>
+              <span style={{fontSize:12,color:"#9fa8da"}}>Showing {((currentPage-1)*PAGE_SIZE)+1}–{Math.min(currentPage*PAGE_SIZE,filtered.length)} of {filtered.length} leads</span>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1} style={{...S.ghost,padding:"4px 10px",fontSize:12,opacity:currentPage===1?0.4:1}}>← Prev</button>
+                {[...Array(Math.min(totalPages,5))].map((_,i)=>{
+                  const pg=currentPage<=3?i+1:currentPage+i-2;
+                  if(pg<1||pg>totalPages)return null;
+                  return <button key={pg} onClick={()=>setCurrentPage(pg)} style={{...S.ghost,padding:"4px 10px",fontSize:12,background:currentPage===pg?B.primary:"#fff",color:currentPage===pg?"#fff":"#5c6bc0"}}>{pg}</button>;
+                })}
+                <button onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages} style={{...S.ghost,padding:"4px 10px",fontSize:12,opacity:currentPage===totalPages?0.4:1}}>Next →</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -834,6 +934,11 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
           {/* TAB: Communication Log */}
           {leadTab==="notes"&&(
             <div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+                {["📞 No answer","📞 Will call back","✅ Interested — sending details","📄 Documents requested","📅 Meeting scheduled","💰 Payment received","❌ Not interested"].map(t=>(
+                  <button key={t} onClick={()=>setNoteText(t)} style={{background:"#f0f4ff",border:"1px solid #c5cae9",borderRadius:6,padding:"2px 8px",fontSize:10,cursor:"pointer",color:"#5c6bc0"}}>{t}</button>
+                ))}
+              </div>
               <div style={{display:"grid",gridTemplateColumns:"130px 1fr auto",gap:8,marginBottom:12}}>
                 <select style={S.sel} value={noteType} onChange={e=>setNoteType(e.target.value)}>
                   {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
@@ -936,6 +1041,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 
 // ─── CASES ───────────────────────────────────────────────────────────────────
 function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
+  const toast=useToast();
   const [sel,setSel]=useState(null);
   const [caseFile,setCaseFile]=useState(null);
   const [caseTab,setCaseTab]=useState("overview");
@@ -949,7 +1055,7 @@ function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
   const changeStage=async(lead,ns,invoices)=>{
     // Gate 1: Docs required before Application
     if(ns==="Applied for Admission"&&!lead.all_doc_received){
-      alert("⛔ All documents must be received first.");return;
+      toast("⛔ All documents must be received first.","error");return;
     }
     // Gate 2: Invoice must exist before moving past Assessment
     const INVOICE_REQUIRED_STAGES=["University Application Submitted","Institution Application Submitted","College Application Submitted","Uni-Assist / Direct Application Submitted","Pre-Enrollment (Universitaly) Submitted","Skills Assessment Applied","Express Entry Profile Created","Job Seeker Visa Filed","Chancenkarte Application Filed","Work Permit Filed","Visa Filed","PR Application Submitted"];
@@ -989,7 +1095,7 @@ Do you want to proceed anyway? (CEO override)`);
     }
     // Gate 4: Case Closed only after WON/Rejected/Refund
     if(ns==="Case Closed"&&lead.stage!=="Visa Approved"&&lead.stage!=="PR Approved"&&lead.stage!=="Visa Rejected"&&lead.stage!=="PR Rejected"&&!lead.stage?.includes("Refund")){
-      alert("⛔ Only close after Visa Approved, Rejected, or Refund.");return;
+      toast("⛔ Only close after Visa Approved, Rejected, or Refund.");return;
     }
     await leadsDB.update(lead.id,{stage:ns});
     await tasksDB.insert({title:`${lead.name}: moved to "${ns}"`,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to,due_date:tod(),priority:"Medium",type:"Follow-up",auto_generated:true});
@@ -1172,6 +1278,11 @@ Do you want to proceed anyway? (CEO override)`);
           {/* TAB: Communication Log */}
           {caseTab==="notes"&&(
             <div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+                {["📞 No answer","✅ Documents received","📋 Application submitted","✈️ Visa filed","🎉 Visa approved","⏳ Awaiting decision","📝 Follow-up needed"].map(t=>(
+                  <button key={t} onClick={()=>setNoteText(t)} style={{background:"#f0f4ff",border:"1px solid #c5cae9",borderRadius:6,padding:"2px 8px",fontSize:10,cursor:"pointer",color:"#5c6bc0"}}>{t}</button>
+                ))}
+              </div>
               <div style={{display:"grid",gridTemplateColumns:"120px 1fr auto",gap:8,marginBottom:12}}>
                 <select style={S.sel} value={noteType} onChange={e=>setNoteType(e.target.value)}>
                   {["Call","WhatsApp","Email","Walk-in","Processing","Other"].map(t=><option key={t}>{t}</option>)}
@@ -1261,6 +1372,7 @@ Do you want to proceed anyway? (CEO override)`);
 
 // ─── TASKS ────────────────────────────────────────────────────────────────────
 function Tasks({tasks,tasksDB,leads,users,currentUser}) {
+  const toast=useToast();
   const [showAdd,setShowAdd]=useState(false);
   const [completeModal,setCompleteModal]=useState(null); // task being completed
   const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:"",not_interested:false,not_interested_reason:""});
@@ -2121,7 +2233,7 @@ function Settings({settingsDB,users,usersDB,currentUser}) {
             <button style={S.btn()} onClick={()=>setShowAddUser(true)}>+ Add Staff Member</button>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
-            {users.map(u=>(
+            {(users||[]).map(u=>(
               <div key={u.id} style={S.card}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
                   <div style={{width:42,height:42,borderRadius:12,background:(roleC[u.role]||"#94a3b8")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:800,color:roleC[u.role]||"#94a3b8"}}>{(u.name||"?").split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
@@ -2453,6 +2565,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 
 // ─── PROCESSING MODULE ───────────────────────────────────────────────────────
 function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUser}) {
+  const toast=useToast();
   const [search,setSearch]=useState("");
   const [caseFile,setCaseFile]=useState(null);
   const [showLogForm,setShowLogForm]=useState(false);
@@ -2553,6 +2666,14 @@ Proceed to "${ns}" anyway?`);
       <div style={{marginBottom:18}}><h2 style={S.h2}>Processing Department</h2><p style={S.sub}>{cases.length} active cases · Full stage tracking & document control</p></div>
 
       {/* Key Stats — clickable filters */}
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+        <button onClick={()=>{
+          const cols=["Name","Country","University","Intake","Stage","Start Date","Docs Status"];
+          const rows=cases.map(l=>[l.name,l.country||"",l.university||"",l.intake||"",l.stage||"",l.created_at?.slice(0,10)||"",(getDocs(l.country)||[]).filter(d=>l.docs?.[`doc_${d}`]).length+"/"+(getDocs(l.country)||[]).length]);
+          const csv=[cols,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+          const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`acl-clients-${tod()}.csv`;a.click();
+        }} style={{...S.ghost,fontSize:11,padding:"6px 12px"}}>📥 Export ACL CSV</button>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
         {[
           {label:"Total ACL Cases",value:leads.filter(l=>l.list==="ACL"&&!l.lost).length,color:B.primary,icon:"📋",filter:"All"},
@@ -2603,8 +2724,8 @@ Proceed to "${ns}" anyway?`);
               const docList=PROCESSING_DOCS[lead.country]||[];
               const docDone=docList.filter(d=>lead.docs?.[`doc_${d}`]).length;
               const pendingReminders=(lead.processing_reminders||[]).filter(r=>!r.done&&r.date<=tod()).length;
-              const stageIdx=(PROCESSING_STAGES[lead.country]||[]).indexOf(lead.stage);
-              const totalStages=(PROCESSING_STAGES[lead.country]||[]).length;
+              const stageIdx=getStages(lead.country).indexOf(lead.stage);
+              const totalStages=getStages(lead.country).length;
               const progress=totalStages>0?Math.round((Math.max(stageIdx,0)/totalStages)*100):0;
               return (
                 <tr key={lead.id}>
@@ -4420,6 +4541,7 @@ function Payroll({users,currentUser,invoices}) {
   const salaryDB=useTable("salaries",{orderBy:"created_at",asc:false});
   const advanceDB=useTable("salary_advances",{orderBy:"date",asc:false});
   const attDB=useTable("attendance",{orderBy:"date",asc:false});
+  const toast=useToast();
   const [selMonth,setSelMonth]=useState(tod().slice(0,7));
   const [showAdd,setShowAdd]=useState(false);
   const [showAdvance,setShowAdvance]=useState(null);
@@ -4873,7 +4995,7 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
       const testCheck = await supabase.from("leads").select("university,intake,processing_stage,portal,b2b_b2c,source_type,external_agent_name,referred_by_staff,original_source,staff_commission_pkr,agent_commission_pct,conditions,app_receive_date,offer_date,admission_sent_date,counselor_notes,todo,case_log,universities").limit(1);
       if(testCheck.error && testCheck.error.message.includes("column")) {
         // Try to add columns dynamically via a safe insert pattern
-        alert("⚠️ Some database columns are missing. Please run the SQL setup first:\n\nGo to Supabase → SQL Editor → paste the setup SQL → Run\n\nThen try importing again.");
+        toast("⚠️ Some database columns are missing. Please run the SQL setup first:\n\nGo to Supabase → SQL Editor → paste the setup SQL → Run\n\nThen try importing again.");
         setStatus("idle");
         return;
       }
@@ -5579,6 +5701,14 @@ export default function App() {
   const [page,setPage]=useState("dashboard"); const [collapsed,setCollapsed]=useState(false);
   const mob = useMobile();
   const [menuOpen,setMenuOpen]=useState(false);
+  const [lastActivity,setLastActivity]=useState(Date.now());
+  // Reset activity timer on interaction
+  React.useEffect(()=>{
+    const reset=()=>setLastActivity(Date.now());
+    window.addEventListener('click',reset);
+    window.addEventListener('keypress',reset);
+    return()=>{window.removeEventListener('click',reset);window.removeEventListener('keypress',reset);}
+  },[]);
   const [authLoading,setAuthLoading]=useState(true);
   const [showReminderPopup,setShowReminderPopup]=useState(false);
 
@@ -5668,6 +5798,7 @@ export default function App() {
   };
 
   return (
+    <ToastProvider>
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
@@ -5776,5 +5907,6 @@ export default function App() {
       </div>
       {showReminderPopup&&<TaskReminderPopup tasks={tasksDB.data} onClose={()=>setShowReminderPopup(false)}/>}
     </>
+    </ToastProvider>
   );
 }
