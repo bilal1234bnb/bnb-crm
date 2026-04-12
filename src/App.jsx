@@ -4246,12 +4246,53 @@ function CaseFileModal({lead, leadsDB, tasksDB, invoices, users, currentUser, on
             )}
           </div>
 
-          {/* Commission info */}
-          {(lead.staff_commission_pkr>0||lead.source_type==="external_agent")&&(
+          {/* Commission info — editable by CEO */}
+          {(editData.staff_commission_pkr>0||editData.source_type==="external_agent"||editData.referred_by_staff)&&(
             <div style={{background:"#fef3c7",borderRadius:10,padding:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#7c5100",marginBottom:6}}>💰 Commission Info</div>
-              {lead.staff_commission_pkr>0&&<div style={{fontSize:12,color:"#7c5100"}}>Staff Commission: PKR {(lead.staff_commission_pkr||0).toLocaleString()} → {lead.referred_by_staff}</div>}
-              {lead.source_type==="external_agent"&&<div style={{fontSize:12,color:"#7c5100"}}>Agent Commission Payable → {lead.external_agent_name}</div>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#7c5100"}}>💰 Commission Info</div>
+              </div>
+              {editData.referred_by_staff&&(
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:11,color:"#92400e",marginBottom:4}}>Staff Commission → {editData.referred_by_staff}</div>
+                  {currentUser.role===ROLES.CEO?(
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12,color:"#7c5100",fontWeight:600}}>PKR</span>
+                      <input
+                        type="number"
+                        style={{...S.inp,width:140,margin:0,fontWeight:700,color:"#7c5100"}}
+                        value={editData.staff_commission_pkr||0}
+                        onChange={e=>setEditData({...editData,staff_commission_pkr:parseFloat(e.target.value)||0})}
+                        onBlur={()=>leadsDB.update(lead.id,{staff_commission_pkr:editData.staff_commission_pkr})}
+                        placeholder="e.g. 20000"
+                      />
+                      <span style={{fontSize:11,color:"#92400e"}}>per case (editable)</span>
+                    </div>
+                  ):(
+                    <div style={{fontSize:13,fontWeight:700,color:"#7c5100"}}>PKR {(editData.staff_commission_pkr||0).toLocaleString()}</div>
+                  )}
+                </div>
+              )}
+              {editData.source_type==="external_agent"&&(
+                <div>
+                  <div style={{fontSize:11,color:"#92400e",marginBottom:4}}>Agent Commission Payable → {editData.external_agent_name}</div>
+                  {currentUser.role===ROLES.CEO?(
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <input
+                        type="number"
+                        style={{...S.inp,width:100,margin:0,fontWeight:700,color:"#7c5100"}}
+                        value={editData.agent_commission_pct||0}
+                        onChange={e=>setEditData({...editData,agent_commission_pct:parseFloat(e.target.value)||0})}
+                        onBlur={()=>leadsDB.update(lead.id,{agent_commission_pct:editData.agent_commission_pct})}
+                        placeholder="e.g. 70"
+                      />
+                      <span style={{fontSize:11,color:"#92400e"}}>% of fee (editable)</span>
+                    </div>
+                  ):(
+                    <div style={{fontSize:13,fontWeight:700,color:"#7c5100"}}>{editData.agent_commission_pct||0}% of fee</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
