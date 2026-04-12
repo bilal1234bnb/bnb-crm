@@ -3828,31 +3828,14 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
         const existing = dupCheck && dupCheck.length > 0;
         if(existing){logs.push({name:client.name,status:"skipped",reason:"Already exists"});continue;}
         
+        // Build lead data - only include safe non-null fields
         const leadData={
           name:client.name,
           phone:client.phone||"",
           email:client.email||"",
-          country:client.country,
+          country:client.country||"",
           list:"ACL",
-          university:client.university,
-          intake:client.intake,
-          stage:client.processing_stage,
-          processing_stage:client.processing_stage,
-          portal:client.portal,
-          b2b_b2c:client.b2b_b2c,
-          source_type:client.source_type,
-          external_agent_name:client.external_agent_name,
-          referred_by_staff:client.referred_by_staff,
-          original_source:client.original_source,
-          staff_commission_pkr:0,
-          agent_commission_pct:client.agent_commission_pct||0,
-          conditions:client.conditions,
-          app_receive_date:client.app_receive_date||null,
-          offer_date:client.offer_date||null,
-          admission_sent_date:client.admission_sent_date||null,
-          counselor_notes:client.counselor_notes,
-          todo:client.todo,
-          remarks:client.process_notes,
+          stage:client.processing_stage||"Shortlisting",
           status:"Active",
           lost:false,
           score:3,
@@ -3860,8 +3843,26 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           agreement_signed:true,
           payment_received:true,
           invoice_generated:true,
+          remarks:client.process_notes||"",
           created_at:new Date().toISOString(),
         };
+        // Add optional fields only if they have valid values
+        if(client.university) leadData.university = client.university;
+        if(client.intake) leadData.intake = client.intake;
+        if(client.processing_stage) leadData.processing_stage = client.processing_stage;
+        if(client.portal) leadData.portal = client.portal;
+        if(client.b2b_b2c) leadData.b2b_b2c = client.b2b_b2c;
+        if(client.source_type) leadData.source_type = client.source_type;
+        if(client.external_agent_name) leadData.external_agent_name = client.external_agent_name;
+        if(client.referred_by_staff) leadData.referred_by_staff = client.referred_by_staff;
+        if(client.original_source) leadData.original_source = client.original_source;
+        if(client.counselor_notes) leadData.counselor_notes = client.counselor_notes;
+        if(client.todo) leadData.todo = client.todo;
+        // Date fields - only add if valid date format
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if(client.app_receive_date && dateRegex.test(client.app_receive_date)) leadData.app_receive_date = client.app_receive_date;
+        if(client.offer_date && dateRegex.test(client.offer_date)) leadData.offer_date = client.offer_date;
+        if(client.admission_sent_date && dateRegex.test(client.admission_sent_date)) leadData.admission_sent_date = client.admission_sent_date;
         // Use direct supabase insert for reliability
         const {error:insertError} = await supabase.from("leads").insert(leadData);
         if(insertError){
