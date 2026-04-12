@@ -396,7 +396,7 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,u
     whatsapp:todayCalls.filter(n=>n.by===u.name&&n.type==="WhatsApp").length,
     walkin:todayCalls.filter(n=>n.by===u.name&&n.type==="Walk-in").length,
     total:todayCalls.filter(n=>n.by===u.name).length,
-  })).filter(s=>s.total>0||true).sort((a,b)=>b.total-a.total);
+  })).filter(s=>s.total>0).sort((a,b)=>b.total-a.total),[counselors,todayCalls]);
 
   // Weekly comm trend (last 7 days)
   const last7=useMemo(()=>[...Array(7)].map((_,i)=>{
