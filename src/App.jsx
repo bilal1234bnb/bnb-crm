@@ -1,5 +1,5 @@
 // BnB CRM v2026-04-12-final
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
 // ─── BRAND ───────────────────────────────────────────────────────────────────
