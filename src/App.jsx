@@ -619,6 +619,11 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
   const [sel,setSel]=useState(null);
   const [caseFile,setCaseFile]=useState(null);
+  const [caseTab,setCaseTab]=useState("overview");
+  const [noteText,setNoteText]=useState("");
+  const [noteType,setNoteType]=useState("Call");
+  const [caseTask,setCaseTask]=useState({title:"",due_date:"",priority:"High"});
+  const [showTaskForm,setShowTaskForm]=useState(false);
   const [showLogForm,setShowLogForm]=useState(false);
   const [logForm,setLogForm]=useState({type:"Processing",text:"",date:tod()});
   const acl=leads.filter(l=>l.list==="ACL"&&!l.lost);
@@ -701,19 +706,233 @@ Do you want to proceed anyway? (CEO override)`);
         {acl.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No active cases yet.</div>}
       </div>
       {sel&&(
-        <Modal title={`Case: ${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={660}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-            <div style={{...S.card,padding:12}}><div style={S.lbl}>Current Stage</div><Pill text={sel.stage} color={B.primary} bg={B.light}/></div>
-            <div style={{...S.card,padding:12}}><div style={S.lbl}>IELTS/PTE</div><div style={{fontSize:14,fontWeight:800,color:B.dark}}>{sel.ielts_score||"—"}</div></div>
+        <Modal title={`📋 ${sel.name} · ${sel.country}`} onClose={()=>{setSel(null);setCaseTab("overview");}} w={760}>
+          {/* Client info bar */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,padding:"10px 14px",background:"#f0f4ff",borderRadius:10}}>
+            {sel.university&&<span style={{fontSize:11,background:"#e0e7ff",color:"#3730a3",borderRadius:6,padding:"3px 10px",fontWeight:600}}>🎓 {sel.university}</span>}
+            {sel.intake&&<span style={{fontSize:11,background:"#fef9c3",color:"#854d0e",borderRadius:6,padding:"3px 10px",fontWeight:600}}>📅 {sel.intake}</span>}
+            {sel.phone&&<span style={{fontSize:11,background:"#dcfce7",color:"#166534",borderRadius:6,padding:"3px 10px",fontWeight:600}}>📞 {sel.phone}</span>}
+            {sel.email&&<span style={{fontSize:11,background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"3px 10px",fontWeight:600}}>✉️ {sel.email}</span>}
+            {sel.ielts_score&&<span style={{fontSize:11,background:"#fce7f3",color:"#9d174d",borderRadius:6,padding:"3px 10px",fontWeight:600}}>IELTS: {sel.ielts_score}</span>}
+            <span style={{fontSize:11,background:"#f3e8ff",color:"#6b21a8",borderRadius:6,padding:"3px 10px",fontWeight:600}}>📌 Since: {sel.created_at?.slice(0,10)||"—"}</span>
           </div>
-          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#5c6bc0",textTransform:"uppercase",marginBottom:10}}>Documents — {sel.country}</div>
-            {(COUNTRY_DOCS[sel.country]||[]).map(doc=><Chk key={doc} label={doc} checked={sel.docs?.[`doc_${doc}`]||false} onChange={()=>toggleDoc(sel,doc)}/>)}
+
+          {/* Progress bar */}
+          {(()=>{const stages=getStages(sel.country);const idx=stages.indexOf(sel.stage);const pct=stages.length>0?Math.round(((idx+1)/stages.length)*100):0;return(
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:11,color:"#5c6bc0",fontWeight:700}}>Processing Progress</span>
+                <span style={{fontSize:12,fontWeight:800,color:B.primary}}>{pct}%</span>
+              </div>
+              <div style={{background:"#eef0fb",borderRadius:6,height:8}}>
+                <div style={{background:B.grad,borderRadius:6,height:8,width:`${pct}%`,transition:"width 0.4s"}}/>
+              </div>
+              <div style={{fontSize:11,color:"#9fa8da",marginTop:3}}>Stage {Math.max(idx+1,1)} of {stages.length}: <strong style={{color:B.primary}}>{sel.stage}</strong></div>
+            </div>
+          );})()}
+
+          {/* Tabs */}
+          <div style={{display:"flex",gap:4,marginBottom:14,borderBottom:"2px solid #eef0fb",paddingBottom:0}}>
+            {[["overview","📊 Overview"],["stage","🔄 Change Stage"],["docs","📁 Documents"],["notes","💬 Log"],["tasks","✅ Tasks"]].map(([k,label])=>(
+              <button key={k} onClick={()=>setCaseTab(k)} style={{padding:"8px 14px",borderRadius:"8px 8px 0 0",border:"none",background:caseTab===k?B.primary:"transparent",color:caseTab===k?"#fff":"#5c6bc0",fontSize:12,fontWeight:caseTab===k?700:500,cursor:"pointer",borderBottom:caseTab===k?"2px solid "+B.primary:"none"}}>
+                {label}
+              </button>
+            ))}
           </div>
-          <div style={S.lbl}>Move to Stage</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",maxHeight:200,overflowY:"auto"}}>
-            {(getStages(sel.country)).map(stage=><button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{...S.ghost,fontSize:12,padding:"6px 12px",borderColor:sel.stage===stage?B.primary:"#c5cae9",color:sel.stage===stage?B.primary:"#5c6bc0",fontWeight:sel.stage===stage?700:500}}>{stage}</button>)}
-          </div>
+
+          {/* TAB: Overview */}
+          {caseTab==="overview"&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{...S.card,padding:12}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Client Details</div>
+                {[["Country",sel.country],["University",sel.university||"—"],["Intake",sel.intake||"—"],["IELTS/PTE",sel.ielts_score||"—"],["Qualification",sel.last_qualification||"—"],["Branch",sel.branch||"—"]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f9"}}>
+                    <span style={{fontSize:11,color:"#9fa8da"}}>{k}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:B.dark}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{...S.card,padding:12}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Processing Status</div>
+                {(()=>{
+                  const allDocs=getDocs(sel.country)||[];
+                  const recvd=allDocs.filter(d=>sel.docs?.[`doc_${d}`]).length;
+                  const invs=(invoices||[]).filter(i=>i.client_name===sel.name);
+                  const paid=invs.reduce((a,i)=>a+(i.paid||0),0);
+                  const total=invs.reduce((a,i)=>a+(i.amount||0),0);
+                  return(<>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f9"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>Documents</span>
+                      <span style={{fontSize:11,fontWeight:700,color:recvd===allDocs.length&&allDocs.length>0?B.success:"#f59e0b"}}>{recvd}/{allDocs.length} received</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f9"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>Invoice</span>
+                      <span style={{fontSize:11,fontWeight:700,color:total>0?B.success:"#9fa8da"}}>{total>0?`PKR ${paid.toLocaleString()} / ${total.toLocaleString()}`:"No invoice"}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f9"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>Payment</span>
+                      <span style={{fontSize:11,fontWeight:700,color:total>0&&paid>=total?B.success:total>0?"#f59e0b":"#9fa8da"}}>{total>0?Math.round((paid/total)*100)+"%":"—"}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>Open Tasks</span>
+                      <span style={{fontSize:11,fontWeight:700,color:B.primary}}>{(tasksDB?.data||[]).filter(t=>t.client_name===sel.name&&!t.done).length}</span>
+                    </div>
+                  </>);
+                })()}
+              </div>
+              {sel.remarks&&<div style={{...S.card,padding:12,gridColumn:"1/-1"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:6}}>Process Notes</div>
+                <div style={{fontSize:12,color:"#37474f",lineHeight:1.6}}>{sel.remarks}</div>
+              </div>}
+              {/* Last comm log */}
+              {(sel.notes||[]).length>0&&(
+                <div style={{...S.card,padding:12,gridColumn:"1/-1"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",marginBottom:8}}>Latest Communication</div>
+                  {[...(sel.notes||[])].slice(-3).reverse().map(note=>(
+                    <div key={note.id} style={{display:"flex",gap:8,marginBottom:6,padding:"6px 0",borderBottom:"1px solid #f3f4f9"}}>
+                      <Pill text={note.type||"Note"} color="#5c6bc0" bg="#eef0fb"/>
+                      <span style={{fontSize:11,color:"#37474f",flex:1}}>{note.text}</span>
+                      <span style={{fontSize:10,color:"#9fa8da",whiteSpace:"nowrap"}}>{note.date||note.at?.slice(0,10)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: Change Stage */}
+          {caseTab==="stage"&&(
+            <div>
+              <div style={{fontSize:12,color:"#5c6bc0",marginBottom:12}}>Current: <strong>{sel.stage}</strong> — click any stage below to move the client</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {getStages(sel.country).map((stage,i)=>{
+                  const isCurrent=sel.stage===stage;
+                  const stages=getStages(sel.country);
+                  const currIdx=stages.indexOf(sel.stage);
+                  const isPast=i<currIdx;
+                  return(
+                    <button key={stage} onClick={()=>{changeStage(sel,stage);setSel(p=>p?{...p,stage}:p);}} style={{padding:"7px 12px",borderRadius:8,border:`2px solid ${isCurrent?B.primary:isPast?"#d1fae5":"#e8eaf6"}`,background:isCurrent?B.primary:isPast?"#f0fdf4":"#fff",color:isCurrent?"#fff":isPast?"#065f46":"#374151",fontSize:11,fontWeight:isCurrent?800:isPast?600:400,cursor:"pointer"}}>
+                      {isPast?"✅ ":isCurrent?"📍 ":""}{stage}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Documents */}
+          {caseTab==="docs"&&(
+            <div>
+              {(()=>{
+                const allDocs=getDocs(sel.country)||[];
+                const pending=allDocs.filter(d=>!sel.docs?.[`doc_${d}`]);
+                const received=allDocs.filter(d=>sel.docs?.[`doc_${d}`]);
+                const toggleDoc=async(doc)=>{
+                  const updated={...(sel.docs||{}),[`doc_${doc}`]:!sel.docs?.[`doc_${doc}`]};
+                  await leadsDB.update(sel.id,{docs:updated});
+                  setSel(p=>({...p,docs:updated}));
+                };
+                return(<>
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <span style={{background:"#fee2e2",color:"#dc2626",borderRadius:20,padding:"3px 12px",fontSize:11,fontWeight:700}}>⏳ Pending: {pending.length}</span>
+                    <span style={{background:"#d1fae5",color:"#065f46",borderRadius:20,padding:"3px 12px",fontSize:11,fontWeight:700}}>✅ Received: {received.length}</span>
+                  </div>
+                  {pending.length>0&&<>
+                    <div style={{fontSize:11,fontWeight:700,color:"#dc2626",marginBottom:6}}>⏳ PENDING</div>
+                    {pending.map(doc=><Chk key={doc} label={doc} checked={false} onChange={()=>toggleDoc(doc)}/>)}
+                  </>}
+                  {received.length>0&&<>
+                    <div style={{fontSize:11,fontWeight:700,color:"#059669",marginTop:10,marginBottom:6}}>✅ RECEIVED</div>
+                    {received.map(doc=><Chk key={doc} label={doc} checked={true} onChange={()=>toggleDoc(doc)}/>)}
+                  </>}
+                </>);
+              })()}
+            </div>
+          )}
+
+          {/* TAB: Communication Log */}
+          {caseTab==="notes"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"120px 1fr auto",gap:8,marginBottom:12}}>
+                <select style={S.sel} value={noteType} onChange={e=>setNoteType(e.target.value)}>
+                  {["Call","WhatsApp","Email","Walk-in","Processing","Other"].map(t=><option key={t}>{t}</option>)}
+                </select>
+                <input style={S.inp} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="What happened? What did client say?" onKeyDown={e=>{
+                  if(e.key==="Enter"&&noteText.trim()){
+                    const note={id:Date.now(),text:noteText.trim(),by:currentUser.name,at:new Date().toLocaleString(),type:noteType,date:tod()};
+                    const updated=[...(sel.notes||[]),note];
+                    leadsDB.update(sel.id,{notes:updated,last_contact:tod()});
+                    setSel(p=>({...p,notes:updated}));
+                    setNoteText("");
+                  }
+                }}/>
+                <button onClick={async()=>{
+                  if(!noteText.trim())return;
+                  const note={id:Date.now(),text:noteText.trim(),by:currentUser.name,at:new Date().toLocaleString(),type:noteType,date:tod()};
+                  const updated=[...(sel.notes||[]),note];
+                  await leadsDB.update(sel.id,{notes:updated,last_contact:tod()});
+                  setSel(p=>({...p,notes:updated}));
+                  setNoteText("");
+                }} style={{...S.btn(B.secondary),whiteSpace:"nowrap"}}>+ Log</button>
+              </div>
+              <div style={{maxHeight:280,overflowY:"auto"}}>
+                {[...(sel.notes||[])].reverse().map(note=>{
+                  const tc={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Processing:{c:"#1a91c7",bg:"#dbeafe",icon:"⚙️"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"}}[note.type]||{c:"#64748b",bg:"#f1f5f9",icon:"📝"};
+                  return(
+                    <div key={note.id} style={{display:"flex",gap:8,marginBottom:8,padding:"8px",background:"#f8f9ff",borderRadius:8,border:"1px solid #e8eaf6"}}>
+                      <div style={{width:28,height:28,borderRadius:6,background:tc.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>{tc.icon}</div>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                          <Pill text={note.type} color={tc.c} bg={tc.bg}/>
+                          <span style={{fontSize:10,color:"#9fa8da"}}>{note.by} · {note.date||note.at?.slice(0,10)}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"#37474f"}}>{note.text}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!(sel.notes||[]).length&&<div style={{textAlign:"center",color:"#9fa8da",fontSize:12,padding:20}}>No communication logged yet.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Tasks */}
+          {caseTab==="tasks"&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:700,color:B.dark}}>Tasks for {sel.name}</div>
+                <button onClick={()=>setShowTaskForm(p=>!p)} style={{...S.btn("#7c3aed"),fontSize:11,padding:"5px 12px"}}>+ Add Task</button>
+              </div>
+              {showTaskForm&&(
+                <div style={{background:"#f8f9ff",borderRadius:10,padding:12,marginBottom:12,border:"1px solid #c5cae9"}}>
+                  <R2>
+                    <Fld label="Task Title"><input style={S.inp} value={caseTask.title} onChange={e=>setCaseTask({...caseTask,title:e.target.value})} placeholder="e.g. Follow up on offer letter"/></Fld>
+                    <Fld label="Due Date"><input type="date" style={S.inp} value={caseTask.due_date} onChange={e=>setCaseTask({...caseTask,due_date:e.target.value})}/></Fld>
+                  </R2>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={async()=>{
+                      if(!caseTask.title.trim())return;
+                      await tasksDB.insert({title:caseTask.title,client_name:sel.name,lead_id:sel.id,assigned_to:currentUser.id,due_date:caseTask.due_date||tod(),priority:caseTask.priority||"High",type:"Processing",auto_generated:false});
+                      setCaseTask({title:"",due_date:"",priority:"High"});
+                      setShowTaskForm(false);
+                    }} style={{...S.btn("#7c3aed"),padding:"7px 16px",fontSize:11}}>Save Task</button>
+                    <button onClick={()=>setShowTaskForm(false)} style={{...S.ghost,padding:"7px 12px",fontSize:11}}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              {(tasksDB?.data||[]).filter(t=>t.client_name===sel.name).sort((a,b)=>a.done-b.done).map(task=>(
+                <div key={task.id} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"8px",background:task.done?"#f8fffe":"#fff",borderRadius:8,marginBottom:6,border:`1px solid ${task.done?"#d1fae5":"#e8eaf6"}`}}>
+                  <div style={{width:16,height:16,borderRadius:4,background:task.done?B.success:"#e8eaf6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#fff",flexShrink:0,marginTop:2}}>{task.done?"✓":""}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:600,color:task.done?"#9fa8da":B.dark,textDecoration:task.done?"line-through":"none"}}>{task.title}</div>
+                    <div style={{fontSize:10,color:"#9fa8da"}}>Due: {task.due_date} · {task.priority}</div>
+                  </div>
+                  {!task.done&&<button onClick={()=>tasksDB.update(task.id,{done:true,completed_at:new Date().toISOString()})} style={{...S.ghost,fontSize:10,padding:"3px 8px",color:B.success,borderColor:B.success}}>Done</button>}
+                </div>
+              ))}
+              {!(tasksDB?.data||[]).filter(t=>t.client_name===sel.name).length&&<div style={{textAlign:"center",color:"#9fa8da",fontSize:12,padding:20}}>No tasks yet for this client.</div>}
+            </div>
+          )}
         </Modal>
       )}
     {caseFile&&<CaseFileModal lead={caseFile} leadsDB={leadsDB} tasksDB={tasksDB} invoices={invoices} users={[]} currentUser={currentUser} onClose={()=>setCaseFile(null)}/>}
