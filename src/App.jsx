@@ -2072,8 +2072,8 @@ Proceed to "${ns}" anyway?`);
           </div>
         </Modal>
       )}
+      {caseFile&&<CaseFileModal lead={caseFile} leadsDB={leadsDB} tasksDB={tasksDB} invoices={invoicesProp||[]} users={users} currentUser={currentUser} onClose={()=>setCaseFile(null)}/>}
     </div>
-  {caseFile&&<CaseFileModal lead={caseFile} leadsDB={leadsDB} tasksDB={tasksDB} invoices={invoicesProp||[]} users={users} currentUser={currentUser} onClose={()=>setCaseFile(null)}/>}
   );
 }
 
