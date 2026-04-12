@@ -3,45 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    
-    <!-- PWA Meta Tags -->
     <meta name="application-name" content="BnB CRM">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="BnB CRM">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#2d3a8c">
-    <meta name="msapplication-TileColor" content="#2d3a8c">
-    
-    <!-- PWA Icons -->
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
-    
-    <!-- Mobile CSS -->
-    <link rel="stylesheet" href="/mobile.css">
-    
     <title>Border and Bridges CRM</title>
-    
-    <!-- Prevent flash of unstyled content -->
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; background: #f0f2fd; }
-      #root { height: 100%; }
-      * { box-sizing: border-box; }
+      html,body{margin:0;padding:0;height:100%;background:#f0f2fd}
+      #root{height:100%}
+      *{box-sizing:border-box}
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    
-    <!-- Register Service Worker -->
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(r => console.log('SW registered:', r.scope))
-            .catch(e => console.log('SW error:', e));
+      if('serviceWorker' in navigator){
+        window.addEventListener('load',()=>{
+          navigator.serviceWorker.register('/sw.js').catch(()=>{});
         });
       }
     </script>
