@@ -667,6 +667,7 @@ Do you want to proceed anyway? (CEO override)`);
           </div>
         </Modal>
       )}
+    {caseFile&&<CaseFileModal lead={caseFile} leadsDB={leadsDB} tasksDB={tasksDB} invoices={invoices} users={[]} currentUser={currentUser} onClose={()=>setCaseFile(null)}/>}
     </div>
   );
 }
@@ -893,7 +894,8 @@ function Accounting({accounts,accountsDB,journals,journalsDB,bankTx,bankTxDB,sub
   const [showJV,setShowJV]=useState(false);
   const [showSubAcc,setShowSubAcc]=useState(false);
   const [jvLines,setJvLines]=useState([{account:"",sub_account_id:"",sub_account_name:"",dr:0,cr:0},{account:"",sub_account_id:"",sub_account_name:"",dr:0,cr:0}]);
-  const [jvNarr,setJvNarr]=useState(""); const [jvDate,setJvDate]=useState(tod());
+  const [jvNarr,setJvNarr]=useState("");
+  const [caseFile,setCaseFile]=useState(null); const [jvDate,setJvDate]=useState(tod());
   const [selLedger,setSelLedger]=useState("");
   const [subForm,setSubForm]=useState({code:"",name:"",type:"Debtor",control_account:"1300",phone:"",email:""});
   const fileRef=useRef();
@@ -1662,9 +1664,17 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 
   const reset=()=>{setStep(1);setRows([]);setErrors([]);setDone(false);setImportCount(0);if(fileRef.current)fileRef.current.value="";};
 
+  const [importMode,setImportMode]=useState("csv"); // csv | excel_acl
   return (
     <div>
-      <div style={{marginBottom:18}}><h2 style={S.h2}>Bulk Import Existing Clients</h2><p style={S.sub}>Upload your existing GCL, PCL, BCL or ACL clients from Excel/CSV</p></div>
+      <div style={{marginBottom:18}}><h2 style={S.h2}>Import Clients</h2><p style={S.sub}>Import existing clients from CSV template or from your Excel sheet</p></div>
+      {/* Mode switcher */}
+      <div style={{display:"flex",gap:8,marginBottom:20}}>
+        <button onClick={()=>setImportMode("csv")} style={{padding:"8px 20px",borderRadius:8,border:`2px solid ${importMode==="csv"?B.primary:"#c5cae9"}`,background:importMode==="csv"?B.light:"#fff",color:importMode==="csv"?B.primary:"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>📄 CSV Import (All Lists)</button>
+        <button onClick={()=>setImportMode("excel_acl")} style={{padding:"8px 20px",borderRadius:8,border:`2px solid ${importMode==="excel_acl"?"#059669":"#c5cae9"}`,background:importMode==="excel_acl"?"#d1fae5":"#fff",color:importMode==="excel_acl"?"#065f46":"#5c6bc0",fontSize:13,fontWeight:700,cursor:"pointer"}}>📊 Import ACL from Excel (56 clients)</button>
+      </div>
+      {importMode==="excel_acl"&&<ACLImport leadsDB={leadsDB} tasksDB={tasksDB} currentUser={currentUser}/>}
+      {importMode==="csv"&&<div>
 
       {/* Step indicator */}
       <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:24}}>
@@ -1800,6 +1810,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
           </div>
         </div>
       )}
+    </div>}
     </div>
   );
 }
@@ -1807,6 +1818,7 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 // ─── PROCESSING MODULE ───────────────────────────────────────────────────────
 function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUser}) {
   const [search,setSearch]=useState("");
+  const [caseFile,setCaseFile]=useState(null);
   const [sel,setSel]=useState(null);
   const [filterCountry,setFilterCountry]=useState("All");
   const [filterStage,setFilterStage]=useState("All");
@@ -2061,6 +2073,7 @@ Proceed to "${ns}" anyway?`);
         </Modal>
       )}
     </div>
+  {caseFile&&<CaseFileModal lead={caseFile} leadsDB={leadsDB} tasksDB={tasksDB} invoices={invoicesProp||[]} users={users} currentUser={currentUser} onClose={()=>setCaseFile(null)}/>}
   );
 }
 
@@ -3948,6 +3961,453 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
   );
 }
 
+// ─── CASE FILE MODAL ──────────────────────────────────────────────────────────
+// Full client case file with activity log, multiple universities, stage change, PDF
+const LOG_CATEGORIES = [
+  {key:"stage_change", icon:"🔄", label:"Stage Change"},
+  {key:"university", icon:"🏫", label:"University Application"},
+  {key:"call", icon:"📞", label:"Call with Client"},
+  {key:"email", icon:"📧", label:"Email Sent"},
+  {key:"document", icon:"📋", label:"Document Request"},
+  {key:"offer", icon:"🎓", label:"Offer Received"},
+  {key:"payment", icon:"💰", label:"Payment"},
+  {key:"note", icon:"ℹ️", label:"General Update"},
+];
+
+function CaseFileModal({lead, leadsDB, tasksDB, invoices, users, currentUser, onClose, allLeads}) {
+  const [activeTab, setActiveTab] = useState("overview");
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState({...lead});
+  const [saving, setSaving] = useState(false);
+
+  // Activity log
+  const [logs, setLogs] = useState(() => {
+    try { return JSON.parse(lead.case_log || "[]"); } catch { return []; }
+  });
+  const [newLog, setNewLog] = useState({category:"note", text:"", date:tod()});
+  const [editingLog, setEditingLog] = useState(null);
+  const [selectedLogs, setSelectedLogs] = useState(new Set());
+
+  // Universities
+  const [unis, setUnis] = useState(() => {
+    try { return JSON.parse(lead.universities || "[]"); } catch { return []; }
+  });
+  const [newUni, setNewUni] = useState({name:"", course:"", portal:"", app_date:"", status:"Applied", notes:""});
+  const [showAddUni, setShowAddUni] = useState(false);
+  const UNI_STATUSES = ["Applied","Offer Received","Conditional Offer","Unconditional Offer","Rejected","Withdrawn","Enrolled"];
+
+  const canEdit = currentUser.role === ROLES.CEO || currentUser.role === ROLES.PROCESSING || currentUser.role === ROLES.ACCOUNTS;
+
+  // Save everything
+  const saveAll = async (newLogs, newUnis, newData) => {
+    const logData = JSON.stringify(newLogs || logs);
+    const uniData = JSON.stringify(newUnis || unis);
+    const data = {...(newData || editData), case_log: logData, universities: uniData};
+    await leadsDB.update(lead.id, data);
+  };
+
+  // Add log entry
+  const addLog = async () => {
+    if (!newLog.text.trim()) return;
+    const entry = {
+      id: Date.now(),
+      category: newLog.category,
+      text: newLog.text.trim(),
+      date: newLog.date || tod(),
+      by: currentUser.name,
+      by_role: currentUser.role,
+      created_at: new Date().toISOString(),
+      include_in_report: true,
+    };
+    const newLogs = [...logs, entry];
+    setLogs(newLogs);
+    setNewLog({category:"note", text:"", date:tod()});
+    await saveAll(newLogs, null, null);
+  };
+
+  // Edit log entry
+  const saveLogEdit = async (id, newText, newDate) => {
+    const newLogs = logs.map(l => l.id === id ? {...l, text: newText, date: newDate, edited_at: new Date().toISOString(), edited_by: currentUser.name} : l);
+    setLogs(newLogs);
+    setEditingLog(null);
+    await saveAll(newLogs, null, null);
+  };
+
+  // Delete log entry
+  const deleteLog = async (id) => {
+    if (!window.confirm("Delete this log entry?")) return;
+    const newLogs = logs.filter(l => l.id !== id);
+    setLogs(newLogs);
+    await saveAll(newLogs, null, null);
+  };
+
+  // Toggle log inclusion in report
+  const toggleLogInclude = async (id) => {
+    const newLogs = logs.map(l => l.id === id ? {...l, include_in_report: !l.include_in_report} : l);
+    setLogs(newLogs);
+    await saveAll(newLogs, null, null);
+  };
+
+  // Add university
+  const addUniversity = async () => {
+    if (!newUni.name.trim()) return;
+    const entry = {...newUni, id: Date.now(), added_at: tod(), added_by: currentUser.name};
+    const newUnis = [...unis, entry];
+    setUnis(newUnis);
+    setNewUni({name:"", course:"", portal:"", app_date:"", status:"Applied", notes:""});
+    setShowAddUni(false);
+    // Auto-log it
+    const logEntry = {id: Date.now()+1, category:"university", text:`University application submitted: ${newUni.name} — ${newUni.course || "Course TBD"} (${newUni.portal || "Portal TBD"})`, date: newUni.app_date || tod(), by: currentUser.name, by_role: currentUser.role, created_at: new Date().toISOString(), include_in_report: true};
+    const newLogs = [...logs, logEntry];
+    setLogs(newLogs);
+    await saveAll(newLogs, newUnis, null);
+  };
+
+  // Update university status
+  const updateUniStatus = async (id, status) => {
+    const uni = unis.find(u => u.id === id);
+    const newUnis = unis.map(u => u.id === id ? {...u, status} : u);
+    setUnis(newUnis);
+    // Auto-log status change
+    const logEntry = {id: Date.now(), category:"offer", text:`${uni.name}: Status updated to "${status}"`, date: tod(), by: currentUser.name, by_role: currentUser.role, created_at: new Date().toISOString(), include_in_report: true};
+    const newLogs = [...logs, logEntry];
+    setLogs(newLogs);
+    await saveAll(newLogs, newUnis, null);
+  };
+
+  // Remove university
+  const removeUni = async (id) => {
+    const uni = unis.find(u => u.id === id);
+    if (!window.confirm(`Remove ${uni?.name}?`)) return;
+    const newUnis = unis.filter(u => u.id !== id);
+    setUnis(newUnis);
+    const logEntry = {id: Date.now(), category:"note", text:`University removed: ${uni?.name}`, date: tod(), by: currentUser.name, by_role: currentUser.role, created_at: new Date().toISOString(), include_in_report: false};
+    const newLogs = [...logs, logEntry];
+    setLogs(newLogs);
+    await saveAll(newLogs, newUnis, null);
+  };
+
+  // Change stage from inside case file
+  const changeStage = async (newStage) => {
+    if (!window.confirm(`Change stage to "${newStage}"?`)) return;
+    const logEntry = {id: Date.now(), category:"stage_change", text:`Stage changed: "${lead.stage || editData.stage}" → "${newStage}"`, date: tod(), by: currentUser.name, by_role: currentUser.role, created_at: new Date().toISOString(), include_in_report: true};
+    const newLogs = [...logs, logEntry];
+    setLogs(newLogs);
+    const newData = {...editData, stage: newStage};
+    setEditData(newData);
+    await saveAll(newLogs, null, newData);
+  };
+
+  // Save edits
+  const saveEdits = async () => {
+    setSaving(true);
+    await saveAll(null, null, editData);
+    setSaving(false);
+    setEditMode(false);
+  };
+
+  // Generate PDF report
+  const generatePDF = () => {
+    const includedLogs = logs.filter(l => l.include_in_report !== false);
+    const uniStatusColor = {Applied:"#3949ab","Offer Received":"#059669","Conditional Offer":"#7c5100","Unconditional Offer":"#059669",Rejected:"#dc2626",Withdrawn:"#374151",Enrolled:"#065f46"};
+    const catIcon = Object.fromEntries(LOG_CATEGORIES.map(c => [c.key, c.icon]));
+
+    const html = `<!DOCTYPE html><html><head><title>Case Report — ${lead.name}</title>
+    <style>
+      body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:20px;color:#1a1a2e;font-size:13px}
+      .header{text-align:center;border-bottom:3px solid #2d3a8c;padding-bottom:20px;margin-bottom:24px}
+      .company{font-size:20px;font-weight:900;color:#2d3a8c}
+      .report-title{font-size:16px;font-weight:700;margin:8px 0 4px;color:#374151}
+      .meta{display:flex;justify-content:space-between;background:#f8f9ff;padding:16px;border-radius:8px;margin-bottom:20px;gap:12px;flex-wrap:wrap}
+      .meta-item{min-width:120px}.meta-label{font-size:10px;color:#9fa8da;font-weight:700;text-transform:uppercase;margin-bottom:2px}
+      .meta-value{font-size:13px;font-weight:700;color:#1a1a2e}
+      .section-title{font-size:13px;font-weight:800;color:#2d3a8c;margin:20px 0 10px;padding-bottom:4px;border-bottom:2px solid #eef0fb;text-transform:uppercase}
+      .uni-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+      .uni-table th{background:#f8f9ff;padding:7px 10px;text-align:left;font-size:11px;color:#5c6bc0;font-weight:700;border-bottom:2px solid #e8eaf6}
+      .uni-table td{padding:7px 10px;border-bottom:1px solid #f3f4f9;font-size:12px}
+      .log-entry{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f9}
+      .log-date{min-width:90px;font-size:11px;color:#9fa8da;font-weight:700;padding-top:2px}
+      .log-icon{font-size:16px;min-width:24px}
+      .log-text{flex:1;font-size:12px;line-height:1.6}
+      .log-by{font-size:10px;color:#9fa8da;margin-top:3px}
+      .footer{margin-top:30px;padding-top:12px;border-top:1px solid #e8eaf6;text-align:center;font-size:10px;color:#9fa8da}
+      @media print{body{margin:0}}
+    </style></head><body>
+    <div class="header">
+      <div class="company">Border and Bridges Pvt. Ltd.</div>
+      <div class="report-title">CLIENT CASE REPORT</div>
+      <div style="font-size:11px;color:#9fa8da">Generated: ${new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'long',year:'numeric'})}</div>
+    </div>
+    <div class="meta">
+      <div class="meta-item"><div class="meta-label">Client Name</div><div class="meta-value">${lead.name}</div></div>
+      <div class="meta-item"><div class="meta-label">Country</div><div class="meta-value">${editData.country || lead.country || '—'}</div></div>
+      <div class="meta-item"><div class="meta-label">Current Stage</div><div class="meta-value">${editData.stage || lead.stage || '—'}</div></div>
+      <div class="meta-item"><div class="meta-label">Intake</div><div class="meta-value">${editData.intake || lead.intake || '—'}</div></div>
+      <div class="meta-item"><div class="meta-label">Contact</div><div class="meta-value">${lead.phone || '—'}</div></div>
+    </div>
+    ${unis.length > 0 ? `
+    <div class="section-title">🏫 University Applications (${unis.length})</div>
+    <table class="uni-table">
+      <thead><tr><th>#</th><th>University</th><th>Course</th><th>Portal</th><th>Applied</th><th>Status</th></tr></thead>
+      <tbody>${unis.map((u,i) => `<tr>
+        <td>${i+1}</td><td><strong>${u.name}</strong></td>
+        <td>${u.course || '—'}</td><td style="font-size:11px">${u.portal || '—'}</td>
+        <td style="font-size:11px">${u.app_date || '—'}</td>
+        <td><span style="color:${uniStatusColor[u.status]||'#374151'};font-weight:700">${u.status}</span></td>
+      </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+    <div class="section-title">📋 Case Activity Log (${includedLogs.length} entries)</div>
+    ${includedLogs.sort((a,b) => (a.date||'').localeCompare(b.date||'')).map(l => `
+    <div class="log-entry">
+      <div class="log-date">${l.date || '—'}</div>
+      <div class="log-icon">${catIcon[l.category] || 'ℹ️'}</div>
+      <div>
+        <div class="log-text">${l.text}</div>
+        <div class="log-by">— ${l.by || 'System'}${l.edited_at ? ' (edited)' : ''}</div>
+      </div>
+    </div>`).join('')}
+    <div class="footer">This report was prepared by Border and Bridges Pvt. Ltd. for ${lead.name} · ${new Date().toLocaleDateString()}</div>
+    </body></html>`;
+
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+    w.print();
+  };
+
+  const stageList = PROCESSING_STAGES[editData.country] || PROCESSING_STAGES[lead.country] || Object.values(PROCESSING_STAGES)[0] || [];
+  const catMap = Object.fromEntries(LOG_CATEGORIES.map(c => [c.key, c]));
+  const uniStatusColors = {Applied:["#3949ab","#eef0fb"],"Offer Received":["#059669","#d1fae5"],"Conditional Offer":["#7c5100","#fef3c7"],"Unconditional Offer":["#059669","#d1fae5"],Rejected:["#dc2626","#fee2e2"],Withdrawn:["#374151","#f3f4f9"],Enrolled:["#065f46","#d1fae5"]};
+
+  return (
+    <Modal title={`📁 Case File — ${lead.name}`} onClose={onClose} w={800}>
+      {/* Tabs */}
+      <div style={{display:"flex",gap:6,marginBottom:18,borderBottom:"2px solid #f3f4f9",paddingBottom:12}}>
+        {[["overview","📋 Overview"],["universities","🏫 Universities ("+unis.length+")"],["log","📝 Activity Log ("+logs.length+")"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setActiveTab(k)} style={{padding:"7px 16px",borderRadius:8,border:"none",background:activeTab===k?B.primary:"transparent",color:activeTab===k?"#fff":"#5c6bc0",fontSize:12,fontWeight:700,cursor:"pointer"}}>{l}</button>
+        ))}
+        <div style={{flex:1}}/>
+        <button onClick={generatePDF} style={{...S.btn("#374151"),fontSize:11,padding:"5px 14px"}}>📄 Client Report PDF</button>
+      </div>
+
+      {/* OVERVIEW TAB */}
+      {activeTab==="overview"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark}}>Client Details</div>
+            {canEdit&&(
+              <div style={{display:"flex",gap:8}}>
+                {editMode?(
+                  <>
+                    <button onClick={saveEdits} disabled={saving} style={{...S.btn(B.success),fontSize:11,padding:"5px 12px"}}>{saving?"Saving...":"✓ Save"}</button>
+                    <button onClick={()=>{setEditMode(false);setEditData({...lead});}} style={{...S.ghost,fontSize:11,padding:"5px 10px"}}>Cancel</button>
+                  </>
+                ):(
+                  <button onClick={()=>setEditMode(true)} style={{...S.ghost,fontSize:11,padding:"5px 12px"}}>✏️ Edit</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            {[
+              ["Name", "name"],["Phone","phone"],["Email","email"],
+              ["Country","country"],["University","university"],["Intake","intake"],
+              ["Portal","portal"],["Source","original_source"],
+            ].map(([label, field])=>(
+              <Fld key={field} label={label}>
+                {editMode
+                  ? <input style={S.inp} value={editData[field]||""} onChange={e=>setEditData({...editData,[field]:e.target.value})}/>
+                  : <div style={{fontSize:13,fontWeight:600,color:B.dark,padding:"6px 0"}}>{lead[field]||editData[field]||"—"}</div>
+                }
+              </Fld>
+            ))}
+          </div>
+
+          {/* Stage change */}
+          <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>
+              Current Stage: <span style={{color:B.primary}}>{editData.stage || lead.stage || "—"}</span>
+            </div>
+            {canEdit&&stageList.length>0&&(
+              <div>
+                <div style={{fontSize:11,color:"#9fa8da",marginBottom:8}}>Change Stage:</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {stageList.map(s=>(
+                    <button key={s} onClick={()=>changeStage(s)}
+                      style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${(editData.stage||lead.stage)===s?B.primary:"#e8eaf6"}`,background:(editData.stage||lead.stage)===s?B.light:"#fff",color:(editData.stage||lead.stage)===s?B.primary:"#9fa8da",fontSize:11,fontWeight:(editData.stage||lead.stage)===s?700:400,cursor:"pointer"}}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Commission info */}
+          {(lead.staff_commission_pkr>0||lead.source_type==="external_agent")&&(
+            <div style={{background:"#fef3c7",borderRadius:10,padding:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#7c5100",marginBottom:6}}>💰 Commission Info</div>
+              {lead.staff_commission_pkr>0&&<div style={{fontSize:12,color:"#7c5100"}}>Staff Commission: PKR {(lead.staff_commission_pkr||0).toLocaleString()} → {lead.referred_by_staff}</div>}
+              {lead.source_type==="external_agent"&&<div style={{fontSize:12,color:"#7c5100"}}>Agent Commission Payable → {lead.external_agent_name}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* UNIVERSITIES TAB */}
+      {activeTab==="universities"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark}}>University Applications</div>
+            {canEdit&&<button onClick={()=>setShowAddUni(true)} style={{...S.btn(B.secondary),fontSize:11,padding:"5px 14px"}}>+ Add University</button>}
+          </div>
+
+          {unis.length===0&&<div style={{textAlign:"center",color:"#9fa8da",padding:32,background:"#f8f9ff",borderRadius:10}}>No universities added yet.</div>}
+
+          {unis.map((u,idx)=>{
+            const [sc,sb]=uniStatusColors[u.status]||["#374151","#f3f4f9"];
+            return (
+              <div key={u.id} style={{...S.card,marginBottom:10,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                      <span style={{fontWeight:800,fontSize:14,color:B.dark}}>{idx+1}. {u.name}</span>
+                      <Pill text={u.status} color={sc} bg={sb}/>
+                    </div>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:"#5c6bc0",flexWrap:"wrap"}}>
+                      {u.course&&<span>📚 {u.course}</span>}
+                      {u.portal&&<span>🌐 {u.portal}</span>}
+                      {u.app_date&&<span>📅 Applied: {u.app_date}</span>}
+                      {u.added_by&&<span>👤 Added by: {u.added_by}</span>}
+                    </div>
+                    {u.notes&&<div style={{fontSize:11,color:"#9fa8da",marginTop:6,fontStyle:"italic"}}>{u.notes}</div>}
+                  </div>
+                  {canEdit&&(
+                    <div style={{display:"flex",gap:6,marginLeft:12}}>
+                      <select value={u.status} onChange={e=>updateUniStatus(u.id,e.target.value)} style={{...S.sel,fontSize:11,padding:"4px 8px",width:"auto"}}>
+                        {["Applied","Offer Received","Conditional Offer","Unconditional Offer","Rejected","Withdrawn","Enrolled"].map(s=><option key={s}>{s}</option>)}
+                      </select>
+                      <button onClick={()=>removeUni(u.id)} style={{...S.ghost,fontSize:10,padding:"4px 8px",color:"#dc2626",borderColor:"#dc2626"}}>Remove</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {showAddUni&&(
+            <div style={{...S.card,border:`2px solid ${B.secondary}`,marginTop:12}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.secondary,marginBottom:12}}>Add University Application</div>
+              <R2>
+                <Fld label="University Name *"><input style={S.inp} value={newUni.name} onChange={e=>setNewUni({...newUni,name:e.target.value})} placeholder="e.g. University of Birmingham"/></Fld>
+                <Fld label="Course/Programme"><input style={S.inp} value={newUni.course} onChange={e=>setNewUni({...newUni,course:e.target.value})} placeholder="e.g. MSc Computer Science"/></Fld>
+              </R2>
+              <R2>
+                <Fld label="Portal Used"><input style={S.inp} value={newUni.portal} onChange={e=>setNewUni({...newUni,portal:e.target.value})} placeholder="e.g. Crizac, Geebee, Direct"/></Fld>
+                <Fld label="Application Date"><input type="date" style={S.inp} value={newUni.app_date} onChange={e=>setNewUni({...newUni,app_date:e.target.value})}/></Fld>
+              </R2>
+              <R2>
+                <Fld label="Status">
+                  <select style={S.sel} value={newUni.status} onChange={e=>setNewUni({...newUni,status:e.target.value})}>
+                    {["Applied","Offer Received","Conditional Offer","Unconditional Offer","Rejected","Withdrawn","Enrolled"].map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </Fld>
+                <Fld label="Notes"><input style={S.inp} value={newUni.notes} onChange={e=>setNewUni({...newUni,notes:e.target.value})} placeholder="Any notes..."/></Fld>
+              </R2>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={addUniversity} style={{...S.btn(B.secondary),padding:"8px 20px"}}>✓ Add University</button>
+                <button onClick={()=>setShowAddUni(false)} style={{...S.ghost,padding:"8px 16px"}}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ACTIVITY LOG TAB */}
+      {activeTab==="log"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.dark}}>Activity Log</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{const newLogs=logs.map(l=>({...l,include_in_report:true}));setLogs(newLogs);saveAll(newLogs,null,null);}} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>☑ Select All</button>
+              <button onClick={()=>{const newLogs=logs.map(l=>({...l,include_in_report:false}));setLogs(newLogs);saveAll(newLogs,null,null);}} style={{...S.ghost,fontSize:10,padding:"4px 8px"}}>☐ Deselect All</button>
+            </div>
+          </div>
+
+          {/* Add new log entry */}
+          {canEdit&&(
+            <div style={{background:"#f8f9ff",borderRadius:10,padding:14,marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Add Log Entry</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                {LOG_CATEGORIES.map(c=>(
+                  <button key={c.key} onClick={()=>setNewLog({...newLog,category:c.key})}
+                    style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${newLog.category===c.key?B.primary:"#e8eaf6"}`,background:newLog.category===c.key?B.light:"#fff",color:newLog.category===c.key?B.primary:"#9fa8da",fontSize:11,fontWeight:newLog.category===c.key?700:400,cursor:"pointer"}}>
+                    {c.icon} {c.label}
+                  </button>
+                ))}
+              </div>
+              <R2>
+                <Fld label="Date"><input type="date" style={S.inp} value={newLog.date} onChange={e=>setNewLog({...newLog,date:e.target.value})}/></Fld>
+                <div/>
+              </R2>
+              <Fld label="Note">
+                <textarea style={{...S.inp,minHeight:70,resize:"vertical"}} value={newLog.text} onChange={e=>setNewLog({...newLog,text:e.target.value})} placeholder={`Add ${catMap[newLog.category]?.label || 'note'}...`}/>
+              </Fld>
+              <button onClick={addLog} style={{...S.btn(B.primary),padding:"8px 20px"}}>+ Add to Log</button>
+            </div>
+          )}
+
+          {/* Log entries */}
+          {logs.length===0&&<div style={{textAlign:"center",color:"#9fa8da",padding:32,background:"#f8f9ff",borderRadius:10}}>No log entries yet. Stage changes and university applications are logged automatically.</div>}
+
+          {[...logs].sort((a,b)=>(b.date||b.created_at||"").localeCompare(a.date||a.created_at||"")).map(entry=>{
+            const cat = catMap[entry.category] || catMap.note;
+            const isEditing = editingLog?.id === entry.id;
+            return (
+              <div key={entry.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:"1px solid #f3f4f9",alignItems:"flex-start"}}>
+                {/* Include in report checkbox */}
+                <input type="checkbox" checked={entry.include_in_report!==false} onChange={()=>toggleLogInclude(entry.id)} style={{marginTop:4,cursor:"pointer",width:16,height:16}} title="Include in PDF report"/>
+                <div style={{fontSize:20,marginTop:2}}>{cat.icon}</div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+                    <Pill text={cat.label} color="#5c6bc0" bg="#eef0fb"/>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <span style={{fontSize:11,color:"#9fa8da"}}>{entry.date}</span>
+                      {canEdit&&!isEditing&&(
+                        <button onClick={()=>setEditingLog({id:entry.id,text:entry.text,date:entry.date})} style={{...S.ghost,fontSize:10,padding:"2px 8px"}}>✏️</button>
+                      )}
+                      {canEdit&&<button onClick={()=>deleteLog(entry.id)} style={{...S.ghost,fontSize:10,padding:"2px 6px",color:"#dc2626",borderColor:"#dc2626"}}>✕</button>}
+                    </div>
+                  </div>
+                  {isEditing?(
+                    <div>
+                      <textarea style={{...S.inp,minHeight:60,resize:"vertical",marginBottom:8}} value={editingLog.text} onChange={e=>setEditingLog({...editingLog,text:e.target.value})}/>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input type="date" style={{...S.inp,width:150,margin:0}} value={editingLog.date} onChange={e=>setEditingLog({...editingLog,date:e.target.value})}/>
+                        <button onClick={()=>saveLogEdit(entry.id,editingLog.text,editingLog.date)} style={{...S.btn(B.success),fontSize:11,padding:"5px 12px"}}>Save</button>
+                        <button onClick={()=>setEditingLog(null)} style={{...S.ghost,fontSize:11,padding:"5px 10px"}}>Cancel</button>
+                      </div>
+                    </div>
+                  ):(
+                    <div style={{fontSize:12,color:"#374151",lineHeight:1.6}}>{entry.text}</div>
+                  )}
+                  <div style={{fontSize:10,color:"#9fa8da",marginTop:4}}>
+                    — {entry.by}{entry.by_role?` (${entry.by_role})`:""}
+                    {entry.edited_at&&<span style={{marginLeft:6,fontStyle:"italic"}}>(edited by {entry.edited_by})</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+
 const NAV = [
   { section:"Overview", items:[{key:"dashboard",label:"Dashboard",icon:"📊"},{key:"reporting",label:"Reports & Analytics",icon:"📈"}] },
   { section:"Counseling", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
@@ -3955,7 +4415,7 @@ const NAV = [
   { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
   { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"agents",label:"Agents (B2B)",icon:"🤝"},{key:"expenses",label:"Expenses",icon:"💸"},{key:"pettycash",label:"Petty Cash",icon:"💵"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
   { section:"HR", items:[{key:"attendance",label:"Attendance",icon:"📅"},{key:"payroll",label:"Payroll & Salaries",icon:"💰"},{key:"staffledger",label:"Staff Ledger",icon:"📖"},{key:"invoicetemplate",label:"Invoice Template",icon:"🎨"}] },
-  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"aclimport",label:"Import ACL from Excel",icon:"📊"},{key:"closedleads",label:"Closed Leads",icon:"❌"},{key:"activitylog",label:"Activity Log",icon:"🛡️"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
+  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"closedleads",label:"Closed Leads",icon:"❌"},{key:"activitylog",label:"Activity Log",icon:"🛡️"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
 ];
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -4037,7 +4497,6 @@ export default function App() {
       case "invoices":      return <Invoices {...props} agents={agentsDB.data}/>;
       case "accounting":    return <Accounting {...props}/>;
       case "bulkimport":    return <BulkImport {...props}/>;
-      case "aclimport":     return <ACLImport leadsDB={leadsDB} tasksDB={tasksDB} currentUser={currentUser}/>;
       case "closedleads":   return <ClosedLeads {...props}/>;
       case "agents":        return <AgentsModule agents={agentsDB.data} agentsDB={agentsDB} invoices={invoicesDB.data} leads={leadsDB.data} currentUser={currentUser}/>;
       case "expenses":      return <Expenses currentUser={currentUser} settings={settings}/>;
