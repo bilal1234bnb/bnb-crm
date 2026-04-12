@@ -4,7 +4,7 @@ import { supabase } from "./supabase.js";
 
 // ─── BRAND ───────────────────────────────────────────────────────────────────
 const B = {
-  primary:"#2d3a8c", secondary:"#1a91c7", accent:"#f0b429",
+  primary:"#2d3a8d", secondary:"#1a91c7", accent:"#f0b429",
   dark:"#1a2057", light:"#eef0fb", success:"#059669", danger:"#dc2626",
   warn:"#d97706", purple:"#7c3aed",
   grad:"linear-gradient(135deg,#1a2057 0%,#2d3a8c 50%,#1a91c7 100%)",
