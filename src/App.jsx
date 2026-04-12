@@ -2,6 +2,22 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
+// ─── ACTIVITY LOG ────────────────────────────────────────────
+const logActivity = async (action, details, user) => {
+  if(!user) return;
+  try {
+    await supabase.from('activity_log').insert({
+      action,
+      details,
+      user_id: user.id,
+      user_name: user.name,
+      user_role: user.role,
+      created_at: new Date().toISOString(),
+      metadata: JSON.stringify(details)
+    });
+  } catch(e) { /* silent fail - never break UI for logging */ }
+};
+
 // ─── BRAND ───────────────────────────────────────────────────────────────────
 const B = {
   primary:"#2d3a8c", secondary:"#1a91c7", accent:"#f0b429",
@@ -144,6 +160,24 @@ const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c51
 const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
 const isMobile = () => typeof window !== 'undefined' && window.innerWidth <= 768;
+
+// ── Error Boundary ─────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('Module crash:', error, info); }
+  render() {
+    if(this.state.error) return (
+      <div style={{background:"#fff",borderRadius:14,padding:32,textAlign:"center",border:"1px solid #fee2e2"}}>
+        <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+        <div style={{fontSize:16,fontWeight:700,color:"#9b1c1c",marginBottom:8}}>This module encountered an error</div>
+        <div style={{fontSize:12,color:"#9fa8da",marginBottom:16}}>{this.state.error.message}</div>
+        <button onClick={()=>this.setState({error:null})} style={{background:"#2d3a8c",color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",cursor:"pointer",fontSize:13}}>↻ Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
 // ── Toast Notification System ─────────────────────────────────
 const ToastContext = React.createContext(null);
@@ -608,6 +642,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   };
   const assign=async(lead,uid)=>await leadsDB.update(lead.id,{assigned_to:uid,approved:true,pending_approval:false});
   const moveList=async(lead,nl)=>{
+    logActivity('list_moved', {lead_name:lead.name, from:lead.list, to:nl}, currentUser);
     if((nl==="PCL"||nl==="BCL")&&!lead.consultation_done){toast("⛔ Complete consultation first.","error");return;}
     // Auto-create follow-up task on list move
     setTimeout(async()=>{
@@ -686,6 +721,56 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
             <button onClick={divideByCountry} style={{...S.btn("#7c3aed"),fontSize:12,padding:"6px 14px"}}>🌍 Divide by Country</button>
             {selected.size>0&&<button onClick={()=>{setSelected(new Set());setShowBatchBar(false);}} style={{...S.ghost,fontSize:12,padding:"6px 12px",color:"#dc2626",borderColor:"#dc2626"}}>✕ Clear</button>}
           </div>
+        </div>
+      )}
+
+      {/* Bulk action bar — appears when leads are selected */}
+      {selected.size>0&&(
+        <div style={{background:B.primary,borderRadius:10,padding:"10px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",animation:"slideIn 0.2s ease"}}>
+          <span style={{color:"#fff",fontWeight:700,fontSize:13,marginRight:4}}>{selected.size} lead{selected.size>1?"s":""} selected</span>
+          {/* Assign counselor */}
+          <select onChange={async e=>{
+            if(!e.target.value)return;
+            const uid=e.target.value;
+            const uname=(users||[]).find(u=>u.id===uid)?.name||uid;
+            if(!window.confirm(`Assign ${selected.size} leads to ${uname}?`)){e.target.value="";return;}
+            for(const id of selected){
+              const lead=leads.find(x=>x.id===id);
+              await leadsDB.update(id,{assigned_to:uid});
+              logActivity('bulk_assigned',{lead_name:lead?.name,assigned_to:uname},currentUser);
+            }
+            setSelected(new Set());
+            toast(`✅ ${selected.size} leads assigned to ${uname}`);
+            e.target.value="";
+          }} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:7,padding:"5px 10px",color:"#fff",fontSize:12,cursor:"pointer"}}>
+            <option value="">👤 Assign to…</option>
+            {(users||[]).filter(u=>u.active&&(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)).map(u=>(
+              <option key={u.id} value={u.id} style={{color:"#000"}}>{u.name}</option>
+            ))}
+          </select>
+          {/* Move to list */}
+          {currentUser.role===ROLES.CEO&&["GCL","PCL","BCL","ACL"].filter(l=>l!==tab).map(l=>(
+            <button key={l} onClick={async()=>{
+              if(!window.confirm(`Move ${selected.size} leads to ${l}?`))return;
+              for(const id of selected){
+                const lead=leads.find(x=>x.id===id);
+                await leadsDB.update(id,{list:l,stage:"New Enquiry"});
+                logActivity('bulk_list_move',{lead_name:lead?.name,from:tab,to:l},currentUser);
+              }
+              setSelected(new Set());
+              toast(`✅ ${selected.size} leads moved to ${l}`);
+            }} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:7,padding:"5px 10px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>→ {l}</button>
+          ))}
+          {/* Export selected */}
+          <button onClick={()=>{
+            const sel=paginated.filter(l=>selected.has(l.id));
+            const cols=["Name","Phone","Email","Country","Source","Stage","Status","Counselor"];
+            const rows=sel.map(l=>[l.name,l.phone||"",l.email||"",l.country||"",l.source||"",l.stage||"",l.status||"",(users||[]).find(u=>u.id===l.assigned_to)?.name||""]);
+            const csv=[cols,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+            const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`leads-export-${tod()}.csv`;a.click();
+            toast(`✅ ${sel.length} leads exported to CSV`);
+          }} style={{background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.25)",borderRadius:7,padding:"5px 10px",color:"#fff",fontSize:12,cursor:"pointer"}}>📥 Export</button>
+          <button onClick={()=>setSelected(new Set())} style={{marginLeft:"auto",background:"none",border:"1px solid rgba(255,255,255,0.2)",borderRadius:7,padding:"4px 10px",color:"rgba(255,255,255,0.7)",fontSize:11,cursor:"pointer"}}>✕ Clear selection</button>
         </div>
       )}
 
@@ -1406,6 +1491,7 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
     if(!completeModal)return;
     const issueVal=markLost?"Not Interested":(outcome.issue||null);
     const remarksVal=markLost?(outcome.not_interested_reason||"Not interested"):(outcome.remarks||null);
+    logActivity('task_completed', {task:completeModal.title, client:completeModal.client_name}, currentUser);
     await tasksDB.update(completeModal.id,{
       done:true,
       outcome_issue:issueVal,
@@ -3459,50 +3545,113 @@ function Reporting({leads,tasks,invoices,users,currentUser,setPage}) {
 }
 
 function ActivityLog({currentUser}) {
-  const logDB=useTable("audit_log",{orderBy:"created_at",asc:false});
-  const [filterUser,setFilterUser]=useState("All");
-  const [filterModule,setFilterModule]=useState("All");
-  const [search,setSearch]=useState("");
-  const users_list=[...new Set(logDB.data.map(l=>l.user_name).filter(Boolean))];
-  const modules_list=[...new Set(logDB.data.map(l=>l.module).filter(Boolean))];
+  const [actLog, setActLog] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [filterUser, setFilterUser] = React.useState("all");
+  const [filterAction, setFilterAction] = React.useState("all");
+  const [users, setUsers] = React.useState([]);
 
-  const filtered=useMemo(()=>{
-    let list=logDB.data;
-    if(filterUser!=="All")list=list.filter(l=>l.user_name===filterUser);
-    if(filterModule!=="All")list=list.filter(l=>l.module===filterModule);
-    if(search.trim())list=list.filter(l=>(l.action||"").toLowerCase().includes(search.toLowerCase()));
-    return list;
-  },[logDB.data,filterUser,filterModule,search]);
+  React.useEffect(()=>{
+    const load = async () => {
+      setLoading(true);
+      const {data:logs} = await supabase.from('activity_log').select('*').order('created_at',{ascending:false}).limit(200);
+      const {data:usrs} = await supabase.from('users').select('id,name,role');
+      setActLog(logs||[]);
+      setUsers(usrs||[]);
+      setLoading(false);
+    };
+    load();
+    const sub = supabase.channel('activity').on('postgres_changes',{event:'INSERT',schema:'public',table:'activity_log'},payload=>{
+      setActLog(p=>[payload.new,...p].slice(0,200));
+    }).subscribe();
+    return () => supabase.removeChannel(sub);
+  },[]);
+
+  const actionColors = {
+    'lead_created':{c:"#065f46",bg:"#d1fae5",icon:"➕",label:"Lead Created"},
+    'list_moved':{c:"#1e40af",bg:"#dbeafe",icon:"🔀",label:"List Moved"},
+    'stage_changed':{c:"#7c3aed",bg:"#ede9fe",icon:"📍",label:"Stage Changed"},
+    'task_completed':{c:"#059669",bg:"#d1fae5",icon:"✅",label:"Task Done"},
+    'bulk_assigned':{c:"#0369a1",bg:"#e0f2fe",icon:"👥",label:"Bulk Assign"},
+    'bulk_list_move':{c:"#854d0e",bg:"#fef3c7",icon:"📦",label:"Bulk Move"},
+    'user_login':{c:"#374151",bg:"#f3f4f6",icon:"🔐",label:"Login"},
+    'invoice_created':{c:"#065f46",bg:"#d1fae5",icon:"🧾",label:"Invoice"},
+  };
+
+  const filtered = actLog.filter(l=>{
+    if(filterUser!=="all"&&l.user_name!==filterUser)return false;
+    if(filterAction!=="all"&&l.action!==filterAction)return false;
+    return true;
+  });
+
+  const uniqueUsers=[...new Set(actLog.map(l=>l.user_name).filter(Boolean))];
+  const uniqueActions=[...new Set(actLog.map(l=>l.action).filter(Boolean))];
 
   return (
     <div>
-      <div style={{marginBottom:18}}><h2 style={S.h2}>Activity Log</h2><p style={S.sub}>Complete record of all actions taken in the system</p></div>
-      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-        <input style={{...S.inp,width:220,margin:0}} placeholder="🔍 Search actions…" value={search} onChange={e=>setSearch(e.target.value)}/>
-        <select style={{...S.sel,width:160}} value={filterUser} onChange={e=>setFilterUser(e.target.value)}><option>All</option>{users_list.map(u=><option key={u}>{u}</option>)}</select>
-        <select style={{...S.sel,width:160}} value={filterModule} onChange={e=>setFilterModule(e.target.value)}><option>All</option>{modules_list.map(m=><option key={m}>{m}</option>)}</select>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div><h2 style={S.h2}>🛡️ Activity Log</h2><p style={S.sub}>Real-time record of all actions — who did what, when</p></div>
+        <div style={{display:"flex",gap:8}}>
+          <select style={{...S.sel,width:"auto"}} value={filterUser} onChange={e=>setFilterUser(e.target.value)}>
+            <option value="all">All Staff</option>
+            {uniqueUsers.map(u=><option key={u} value={u}>{u}</option>)}
+          </select>
+          <select style={{...S.sel,width:"auto"}} value={filterAction} onChange={e=>setFilterAction(e.target.value)}>
+            <option value="all">All Actions</option>
+            {uniqueActions.map(a=><option key={a} value={a}>{actionColors[a]?.label||a}</option>)}
+          </select>
+        </div>
       </div>
-      <div style={S.card}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>{["Time","User","Module","Action"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {filtered.slice(0,200).map(log=>(
-              <tr key={log.id}>
-                <td style={{...S.td,fontSize:11,color:"#9fa8da",whiteSpace:"nowrap"}}>{log.created_at?.replace("T"," ").slice(0,16)||"—"}</td>
-                <td style={S.td}><span style={{fontWeight:700,color:B.dark}}>{log.user_name||"—"}</span></td>
-                <td style={S.td}><Pill text={log.module||"—"} color="#5c6bc0" bg="#eef0fb"/></td>
-                <td style={S.td}>{log.action}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length===0&&<div style={{padding:24,textAlign:"center",color:"#9fa8da"}}>No activity logs yet.</div>}
+
+      {/* Summary stats */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+        {Object.entries(actionColors).map(([key,{c,bg,icon,label}])=>{
+          const cnt=actLog.filter(l=>l.action===key).length;
+          if(cnt===0)return null;
+          return(
+            <div key={key} style={{background:"#fff",borderRadius:10,padding:"12px 14px",border:"1px solid #e8eaf6",cursor:"pointer"}} onClick={()=>setFilterAction(filterAction===key?"all":key)}>
+              <div style={{fontSize:11,color:"#9fa8da",marginBottom:4}}>{icon} {label}</div>
+              <div style={{fontSize:22,fontWeight:700,color:c}}>{cnt}</div>
+            </div>
+          );
+        })}
       </div>
+
+      {loading?<div style={{textAlign:"center",padding:32,color:"#9fa8da"}}>Loading activity log…</div>:(
+        <div style={{...S.card,padding:0}}>
+          {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No activity found. Actions will appear here automatically.</div>}
+          {filtered.map((log,i)=>{
+            const ac=actionColors[log.action]||{c:"#9fa8da",bg:"#f3f4f9",icon:"📝",label:log.action};
+            let details="";
+            try{const d=JSON.parse(log.metadata||"{}");
+              if(log.action==="lead_created")details=`${d.lead_name} → ${d.list} (${d.country})`;
+              else if(log.action==="list_moved")details=`${d.lead_name}: ${d.from} → ${d.to}`;
+              else if(log.action==="stage_changed")details=`${d.lead_name}: "${d.from}" → "${d.to}"`;
+              else if(log.action==="task_completed")details=`${d.task}${d.client?" for "+d.client:""}`;
+              else if(log.action==="bulk_assigned")details=`${d.lead_name} → ${d.assigned_to}`;
+              else if(log.action==="user_login")details=`Logged in`;
+              else details=log.details||"";
+            }catch(e){details=log.details||"";}
+            return(
+              <div key={log.id||i} style={{display:"flex",gap:12,padding:"12px 16px",borderBottom:"1px solid #f3f4f9",alignItems:"flex-start"}}>
+                <div style={{width:34,height:34,borderRadius:10,background:ac.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ac.icon}</div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                    <span style={{fontSize:12,fontWeight:700,color:ac.c}}>{ac.label}</span>
+                    <span style={{fontSize:10,color:"#9fa8da"}}>{log.created_at?.slice(0,16).replace("T"," ")}</span>
+                  </div>
+                  <div style={{fontSize:12,color:"#37474f"}}>{details}</div>
+                  <div style={{fontSize:10,color:"#9fa8da",marginTop:2}}>by <strong>{log.user_name}</strong> ({log.user_role})</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── TASK REMINDER POPUP ──────────────────────────────────────────────────────
 function TaskReminderPopup({tasks,onClose}) {
   const overdue=tasks.filter(t=>!t.done&&t.due_date&&t.due_date<tod());
   const dueToday=tasks.filter(t=>!t.done&&t.due_date===tod());
@@ -5902,7 +6051,7 @@ export default function App() {
           <div style={{flex:1,overflowY:"auto",padding:mob?"12px 12px 24px":"24px 28px 60px",marginTop:mob?"max(54px,calc(44px + env(safe-area-inset-top,0px)))":"0"}}>
             {/* Mobile page title */}
             {mob&&<div style={{fontSize:16,fontWeight:800,color:B.dark,marginBottom:12}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>}
-            <div style={{width:"100%"}}>{renderPage()}</div>
+            <div style={{width:"100%"}}><ErrorBoundary key={page}>{renderPage()}</ErrorBoundary></div>
           </div>
         </div>
       </div>
