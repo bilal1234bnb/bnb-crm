@@ -2888,10 +2888,7 @@ function Reporting({leads,tasks,invoices,users,currentUser,setPage}) {
   };
 
   // PDF download (uses print dialog)
-  const handlePDF = () => {
-    window.alert("In the print dialog that opens:\\n1. Change destination to \\"Save as PDF\\"\\n2. Click Save\\n\\nThis saves the current report as a PDF.");
-    handlePrint();
-  };
+  const handlePDF = () => { alert("To save as PDF: open print dialog, change Destination to Save as PDF, click Save."); handlePrint(); };
 
   // ── Sub-components ────────────────────────────────────────
   const RCard=({title,value,sub,color="#2d3a8c",icon})=>(
