@@ -161,7 +161,60 @@ const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
 const isMobile = () => typeof window !== 'undefined' && window.innerWidth <= 768;
 
+// ── Onboarding Tour ──────────────────────────────────────────
+const TOUR_STEPS = [
+  { title:"Welcome to BnB CRM!", body:"This is your central hub for managing all leads, clients, staff and finances for Border and Bridges Pvt. Ltd.", icon:"🎉", highlight:null },
+  { title:"Dashboard", body:"Your daily command center. See all KPIs, today's calls by staff, pipeline status, and pending actions at a glance.", icon:"📊", highlight:"dashboard" },
+  { title:"Leads Pipeline", body:"Manage GCL → PCL → BCL → ACL. Use quick log buttons 📞💬🚶 to log calls in one tap. Red badge means idle 7+ days.", icon:"👥", highlight:"leads" },
+  { title:"Processing Tracker", body:"Track each client's visa stage, documents, and application progress. Stage changes are auto-logged.", icon:"🔄", highlight:"processing" },
+  { title:"Reports & Analytics", body:"5 report tabs: Executive, Counseling, Processing, Financial, HR. Print or save as PDF anytime.", icon:"📊", highlight:"reporting" },
+  { title:"You're all set!", body:"Press Ctrl+K anytime to search. Use the bulk select checkboxes to act on multiple leads at once. Good luck! 💪", icon:"✅", highlight:null },
+];
+
+function OnboardingTour({onDone, setPage}) {
+  const [step,setStep]=useState(0);
+  const cur=TOUR_STEPS[step];
+  const isLast=step===TOUR_STEPS.length-1;
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.7)",zIndex:10000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#fff",borderRadius:20,padding:36,maxWidth:460,width:"100%",boxShadow:"0 24px 80px rgba(0,0,0,0.3)",textAlign:"center"}}>
+        <div style={{fontSize:52,marginBottom:16}}>{cur.icon}</div>
+        <div style={{fontSize:18,fontWeight:800,color:"#1a2057",marginBottom:12}}>{cur.title}</div>
+        <div style={{fontSize:14,color:"#5c6bc0",lineHeight:1.7,marginBottom:28}}>{cur.body}</div>
+        <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:24}}>
+          {TOUR_STEPS.map((_,i)=>(
+            <div key={i} style={{width:i===step?24:8,height:8,borderRadius:4,background:i===step?"#2d3a8c":i<step?"#9fa8da":"#e8eaf6",transition:"all 0.3s"}}/>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+          {step>0&&<button onClick={()=>setStep(p=>p-1)} style={{background:"#f0f4ff",border:"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontSize:13,color:"#5c6bc0",fontWeight:600}}>← Back</button>}
+          {!isLast&&cur.highlight&&<button onClick={()=>{setPage(cur.highlight);setStep(p=>p+1);}} style={{background:"#f0f4ff",border:"1px solid #c5cae9",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontSize:13,color:"#2d3a8c",fontWeight:600}}>Show me →</button>}
+          <button onClick={()=>{ if(isLast) onDone(); else setStep(p=>p+1); }} style={{background:"#2d3a8c",border:"none",borderRadius:10,padding:"10px 24px",cursor:"pointer",fontSize:13,color:"#fff",fontWeight:700}}>
+            {isLast?"Let's go! 🚀":"Next →"}
+          </button>
+        </div>
+        <button onClick={onDone} style={{background:"none",border:"none",color:"#9fa8da",fontSize:11,cursor:"pointer",marginTop:16}}>Skip tour</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Error Boundary ─────────────────────────────────────────
+// ── Help Tooltip ─────────────────────────────────────────────
+function HelpTip({text}) {
+  const [show,setShow]=useState(false);
+  return(
+    <span style={{position:"relative",display:"inline-block",marginLeft:4}}>
+      <span
+        onMouseEnter={()=>setShow(true)}
+        onMouseLeave={()=>setShow(false)}
+        style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:15,height:15,borderRadius:"50%",background:"#e8eaf6",color:"#5c6bc0",fontSize:9,fontWeight:800,cursor:"help"}}
+      >?</span>
+      {show&&<div style={{position:"absolute",bottom:"120%",left:"50%",transform:"translateX(-50%)",background:"#1a2057",color:"#fff",fontSize:11,borderRadius:8,padding:"6px 10px",whiteSpace:"nowrap",zIndex:999,boxShadow:"0 4px 12px rgba(0,0,0,0.2)",maxWidth:220,whiteSpace:"normal",lineHeight:1.4}}>{text}</div>}
+    </span>
+  );
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -337,7 +390,7 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,u
 
   // Staff call stats today
   const counselors=(users||[]).filter(u=>u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER||u.role===ROLES.PROCESSING);
-  const staffCallStats=counselors.map(u=>({
+  const staffCallStats=useMemo(()=>counselors.map(u=>({
     name:u.name.split(" ")[0],
     calls:todayCalls.filter(n=>n.by===u.name&&(n.type==="Call")).length,
     whatsapp:todayCalls.filter(n=>n.by===u.name&&n.type==="WhatsApp").length,
@@ -346,11 +399,11 @@ function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage,u
   })).filter(s=>s.total>0||true).sort((a,b)=>b.total-a.total);
 
   // Weekly comm trend (last 7 days)
-  const last7=[...Array(7)].map((_,i)=>{
+  const last7=useMemo(()=>[...Array(7)].map((_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-i);
     const ds=d.toISOString().slice(0,10);
     return {date:ds.slice(5),calls:allNotes.filter(n=>(n.date===ds||n.at?.slice(0,10)===ds)&&(n.type==="Call"||n.type==="WhatsApp")).length};
-  }).reverse();
+  }).reverse(),[allNotes]);
 
   return (
     <div>
@@ -527,6 +580,21 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const [showBatchBar,setShowBatchBar]=useState(false);
   const [currentPage,setCurrentPage]=useState(1);
   const PAGE_SIZE=50;
+  const [savedFilters,setSavedFilters]=useState(()=>{try{return JSON.parse(localStorage.getItem('bnb_saved_filters')||'[]');}catch{return [];}});
+  const saveFilter=()=>{
+    const name=window.prompt("Name this filter preset:");
+    if(!name)return;
+    const f={name,tab,search,created:tod()};
+    const updated=[...savedFilters.filter(x=>x.name!==name),f];
+    setSavedFilters(updated);
+    localStorage.setItem('bnb_saved_filters',JSON.stringify(updated));
+  };
+  const loadFilter=(f)=>{changeTab(f.tab);setSearch(f.search||"");};
+  const deleteFilter=(name)=>{
+    const updated=savedFilters.filter(f=>f.name!==name);
+    setSavedFilters(updated);
+    localStorage.setItem('bnb_saved_filters',JSON.stringify(updated));
+  };
   const sources=settings?.lead_sources?JSON.parse(settings.lead_sources):LEAD_SOURCES_DEFAULT;
   const EF={name:"",phone:"",email:"",country:"🇬🇧 UK",source:sources[0]||"Other",branch:currentUser.branch,type:"B2C",last_qualification:"",last_qualification_year:"",ielts_score:"",intake_target:"",issue:"",status:"New",remarks:"",reminder1:"",reminder2:"",reminder3:"",enquiry_date:tod()};
   const [form,setForm]=useState(EF);
@@ -552,7 +620,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   const counselors=useMemo(()=>users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active),[users]);
 
   const isReminderDue=(r)=>r&&r<=tod();
-  const rowHighlight=(lead)=>{
+  const rowHighlight=React.useCallback((lead)=>{
     // PCL reminders
     if(tab==="PCL"){
       const due=[lead.reminder1,lead.reminder2,lead.reminder3].some(r=>isReminderDue(r));
@@ -565,7 +633,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
       if(daysSince>=7&&lead.list==="GCL") return {background:"#fff1f2",borderLeft:"4px solid #fca5a5"};
     }
     return {};
-  };
+  },[tab]);
   const getIdleWarning=(lead)=>{
     const lastContact=lead.last_contact||lead.created_at?.slice(0,10);
     if(!lastContact) return null;
@@ -694,12 +762,24 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
             </button>
           ))}
         </div>
+        <button onClick={()=>window.print()} style={{...S.ghost,fontSize:11,padding:"6px 10px",flexShrink:0}} title="Print leads list">🖨️</button>
         <button onClick={()=>{
           const cols=["Name","Phone","Email","Country","Source","Stage","Status","Branch","Counselor","Created"];
           const rows=filtered.map(l=>[l.name,l.phone||"",l.email||"",l.country||"",l.source||"",l.stage||"",l.status||"",l.branch||"",(users||[]).find(u=>u.id===l.assigned_to)?.name||"",l.created_at?.slice(0,10)||""]);
           const csv=[cols,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
           const blob=new Blob([csv],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`leads-${tab}-${tod()}.csv`;a.click();
         }} style={{...S.ghost,fontSize:11,padding:"6px 12px",whiteSpace:"nowrap",flexShrink:0}}>📥 Export CSV</button>
+        <button onClick={saveFilter} style={{...S.ghost,fontSize:11,padding:"6px 10px",flexShrink:0}} title="Save current filter as preset">🔖 Save Filter</button>
+        {savedFilters.length>0&&(
+          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+            {savedFilters.map(f=>(
+              <div key={f.name} style={{display:"flex",alignItems:"center",gap:2,background:"#eef0fb",borderRadius:6,padding:"2px 8px"}}>
+                <span onClick={()=>loadFilter(f)} style={{fontSize:10,color:B.primary,cursor:"pointer",fontWeight:600}}>{f.name}</span>
+                <span onClick={()=>deleteFilter(f.name)} style={{fontSize:10,color:"#9fa8da",cursor:"pointer",marginLeft:2}}>✕</span>
+              </div>
+            ))}
+          </div>
+        )}
         <input style={{...S.inp,width:220,margin:0}} placeholder="🔍 Search name, phone, country…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
 
@@ -823,7 +903,8 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
                     <div style={{display:"flex",gap:3,marginBottom:3}}>
                       {["📞","💬","🚶"].map((icon,i)=>{
                         const types=["Call","WhatsApp","Walk-in"];
-                        return <button key={i} title={`Quick log: ${types[i]}`} onClick={async(e)=>{
+                        const labels=["Log a call","Log WhatsApp message","Log walk-in visit"];
+                        return <button key={i} title={labels[i]} aria-label={labels[i]} onClick={async(e)=>{
                           e.stopPropagation();
                           const note={id:Date.now(),text:`${types[i]} with client`,by:currentUser.name,at:new Date().toLocaleString(),type:types[i],date:tod()};
                           const updated=[...(lead.notes||[]),note];
@@ -837,7 +918,14 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
             })}
           </tbody>
         </table>
-        {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No leads in {tab}{search?` matching "${search}"`:""}.</div>}
+        {filtered.length===0&&(
+            <div style={{padding:40,textAlign:"center"}}>
+              <div style={{fontSize:40,marginBottom:12}}>📭</div>
+              <div style={{fontSize:15,fontWeight:700,color:"#37474f",marginBottom:6}}>{search?`No results for "${search}"`:`No leads in ${tab} yet`}</div>
+              <div style={{fontSize:12,color:"#9fa8da",marginBottom:16}}>{search?"Try a different search term or clear the filter":tab==="GCL"?"Add your first lead using the + Add Lead button above":"Leads will appear here when moved to this list"}</div>
+              {!search&&tab==="GCL"&&<button onClick={()=>setShowAdd(true)} style={{...S.btn(),fontSize:12}}>+ Add First Lead</button>}
+            </div>
+          )}
           {totalPages>1&&(
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderTop:"1px solid #e8eaf6",background:"#fafbff"}}>
               <span style={{fontSize:12,color:"#9fa8da"}}>Showing {((currentPage-1)*PAGE_SIZE)+1}–{Math.min(currentPage*PAGE_SIZE,filtered.length)} of {filtered.length} leads</span>
@@ -5851,13 +5939,59 @@ export default function App() {
   const [page,setPage]=useState("dashboard"); const [collapsed,setCollapsed]=useState(false);
   const mob = useMobile();
   const [menuOpen,setMenuOpen]=useState(false);
+  const [globalSearch,setGlobalSearch]=useState("");
+  const [showGlobalResults,setShowGlobalResults]=useState(false);
   const [lastActivity,setLastActivity]=useState(Date.now());
+  const [showTimeoutWarn,setShowTimeoutWarn]=useState(false);
+  const [showTour,setShowTour]=useState(()=>{
+    try{return !localStorage.getItem('bnb_tour_done');}catch{return false;}
+  });
+  const [isOffline,setIsOffline]=useState(!navigator.onLine);
+  React.useEffect(()=>{
+    const goOffline=()=>setIsOffline(true);
+    const goOnline=()=>setIsOffline(false);
+    window.addEventListener('offline',goOffline);
+    window.addEventListener('online',goOnline);
+    return()=>{window.removeEventListener('offline',goOffline);window.removeEventListener('online',goOnline);}
+  },[]);
+  const completeTour=()=>{
+    try{localStorage.setItem('bnb_tour_done','1');}catch{}
+    setShowTour(false);
+  };
+  // Session timeout check every 60 seconds
+  React.useEffect(()=>{
+    const interval=setInterval(()=>{
+      const idle=Date.now()-lastActivity;
+      if(idle>45*60*1000&&idle<60*60*1000) setShowTimeoutWarn(true);
+      else if(idle>60*60*1000){ setShowTimeoutWarn(false); signOut(); }
+      else setShowTimeoutWarn(false);
+    },60000);
+    return()=>clearInterval(interval);
+  },[lastActivity]);
   // Reset activity timer on interaction
   React.useEffect(()=>{
     const reset=()=>setLastActivity(Date.now());
     window.addEventListener('click',reset);
     window.addEventListener('keypress',reset);
-    return()=>{window.removeEventListener('click',reset);window.removeEventListener('keypress',reset);}
+    // Keyboard shortcuts
+    const onKey=(e)=>{
+      // Ctrl+K or Cmd+K = focus global search
+      if((e.ctrlKey||e.metaKey)&&e.key==='k'){
+        e.preventDefault();
+        document.querySelector('input[placeholder*="Search leads"]')?.focus();
+      }
+      // Escape = close search
+      if(e.key==='Escape'){
+        setShowGlobalResults(false);
+        setGlobalSearch("");
+      }
+    };
+    window.addEventListener('keydown',onKey);
+    return()=>{
+      window.removeEventListener('click',reset);
+      window.removeEventListener('keypress',reset);
+      window.removeEventListener('keydown',onKey);
+    }
   },[]);
   const [authLoading,setAuthLoading]=useState(true);
   const [showReminderPopup,setShowReminderPopup]=useState(false);
@@ -6042,10 +6176,65 @@ export default function App() {
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",marginLeft:mob?0:undefined}}>
           {/* Top bar — hidden on mobile (we have the header) */}
           {!mob&&(
-            <div style={{background:"#fff",borderBottom:"1px solid #e8eaf6",padding:"11px 26px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-              <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>
-              {overdueCount>0&&<button onClick={()=>setShowReminderPopup(p=>!p)} style={{background:"#fee2e2",border:"1px solid #dc2626",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7f1d1d",fontWeight:700,cursor:"pointer"}}>🔔 {overdueCount} task{overdueCount>1?"s":""} overdue</button>}
-              {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
+            <div style={{background:"#fff",borderBottom:"1px solid #e8eaf6",padding:"10px 26px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,gap:12}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark,whiteSpace:"nowrap"}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>
+              {/* Global search bar */}
+              <div style={{flex:1,maxWidth:400,position:"relative"}}>
+                <input
+                  style={{...S.inp,margin:0,paddingLeft:32,fontSize:12,width:"100%"}}
+                  placeholder="🔍 Search leads, clients, tasks, invoices…"
+                  value={globalSearch}
+                  onChange={e=>{setGlobalSearch(e.target.value);setShowGlobalResults(e.target.value.length>1);}}
+                  onBlur={()=>setTimeout(()=>setShowGlobalResults(false),200)}
+                  onFocus={()=>globalSearch.length>1&&setShowGlobalResults(true)}
+                />
+                {showGlobalResults&&globalSearch.length>1&&(()=>{
+                  const q=globalSearch.toLowerCase();
+                  const leadResults=leadsDB.data?.filter(l=>l.name?.toLowerCase().includes(q)||l.phone?.includes(q)||l.email?.toLowerCase().includes(q)).slice(0,5)||[];
+                  const taskResults=tasksDB.data?.filter(t=>t.title?.toLowerCase().includes(q)||t.client_name?.toLowerCase().includes(q)).slice(0,3)||[];
+                  const invResults=invoicesDB.data?.filter(i=>i.client_name?.toLowerCase().includes(q)).slice(0,3)||[];
+                  const total=leadResults.length+taskResults.length+invResults.length;
+                  if(total===0)return null;
+                  return(
+                    <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e8eaf6",borderRadius:10,boxShadow:"0 8px 32px rgba(0,0,0,0.12)",zIndex:800,maxHeight:400,overflowY:"auto",marginTop:4}}>
+                      {leadResults.length>0&&<>
+                        <div style={{padding:"6px 12px",fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",background:"#fafbff"}}>Leads ({leadResults.length})</div>
+                        {leadResults.map(l=>(
+                          <div key={l.id} onMouseDown={()=>{setPage("leads");setGlobalSearch("");setShowGlobalResults(false);}} style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f9",display:"flex",justifyContent:"space-between"}} onMouseEnter={e=>e.currentTarget.style.background="#f0f4ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                            <div>
+                              <div style={{fontSize:12,fontWeight:700,color:B.dark}}>{l.name}</div>
+                              <div style={{fontSize:10,color:"#9fa8da"}}>{l.phone} · {l.country} · {l.list}</div>
+                            </div>
+                            <Pill text={l.stage||"New"} color="#5c6bc0" bg="#eef0fb"/>
+                          </div>
+                        ))}
+                      </>}
+                      {taskResults.length>0&&<>
+                        <div style={{padding:"6px 12px",fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",background:"#fafbff"}}>Tasks ({taskResults.length})</div>
+                        {taskResults.map(t=>(
+                          <div key={t.id} onMouseDown={()=>{setPage("tasks");setGlobalSearch("");setShowGlobalResults(false);}} style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f9"}} onMouseEnter={e=>e.currentTarget.style.background="#f0f4ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                            <div style={{fontSize:12,fontWeight:700,color:B.dark}}>{t.title}</div>
+                            <div style={{fontSize:10,color:"#9fa8da"}}>Due: {t.due_date} · {t.priority}</div>
+                          </div>
+                        ))}
+                      </>}
+                      {invResults.length>0&&<>
+                        <div style={{padding:"6px 12px",fontSize:10,fontWeight:700,color:"#9fa8da",textTransform:"uppercase",background:"#fafbff"}}>Invoices ({invResults.length})</div>
+                        {invResults.map(i=>(
+                          <div key={i.id} onMouseDown={()=>{setPage("invoices");setGlobalSearch("");setShowGlobalResults(false);}} style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f9"}} onMouseEnter={e=>e.currentTarget.style.background="#f0f4ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                            <div style={{fontSize:12,fontWeight:700,color:B.dark}}>{i.client_name}</div>
+                            <div style={{fontSize:10,color:"#9fa8da"}}>PKR {(i.amount||0).toLocaleString()} · {i.paid>=i.amount?"Paid":"Pending"}</div>
+                          </div>
+                        ))}
+                      </>}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div style={{display:"flex",gap:8,flexShrink:0}}>
+                {overdueCount>0&&<button onClick={()=>setShowReminderPopup(p=>!p)} style={{background:"#fee2e2",border:"1px solid #dc2626",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7f1d1d",fontWeight:700,cursor:"pointer"}}>🔔 {overdueCount} overdue</button>}
+                {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount}</div>}
+              </div>
             </div>
           )}
           <div style={{flex:1,overflowY:"auto",padding:mob?"12px 12px 24px":"24px 28px 60px",marginTop:mob?"max(54px,calc(44px + env(safe-area-inset-top,0px)))":"0"}}>
@@ -6056,6 +6245,18 @@ export default function App() {
         </div>
       </div>
       {showReminderPopup&&<TaskReminderPopup tasks={tasksDB.data} onClose={()=>setShowReminderPopup(false)}/>}
+      {showTimeoutWarn&&(
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#7c3aed",color:"#fff",borderRadius:12,padding:"12px 24px",zIndex:9999,display:"flex",alignItems:"center",gap:12,boxShadow:"0 8px 32px rgba(0,0,0,0.2)"}}>
+          <span style={{fontSize:13}}>⏱️ You have been idle for 45 minutes. Session will expire in 15 minutes.</span>
+          <button onClick={()=>{setLastActivity(Date.now());setShowTimeoutWarn(false);}} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:7,padding:"5px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>Stay Logged In</button>
+        </div>
+      )}
+      {showTour&&<OnboardingTour onDone={completeTour} setPage={setPage}/>}
+      {isOffline&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,background:"#dc2626",color:"#fff",textAlign:"center",padding:"8px",fontSize:13,fontWeight:700,zIndex:9999}}>
+          📡 You are offline — changes will not be saved until connection is restored
+        </div>
+      )}
     </>
     </ToastProvider>
   );
