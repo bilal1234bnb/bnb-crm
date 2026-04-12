@@ -575,6 +575,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 // ─── CASES ───────────────────────────────────────────────────────────────────
 function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
   const [sel,setSel]=useState(null);
+  const [caseFile,setCaseFile]=useState(null);
   const acl=leads.filter(l=>l.list==="ACL"&&!l.lost);
   const changeStage=async(lead,ns,invoices)=>{
     // Gate 1: Docs required before Application
