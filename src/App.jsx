@@ -675,7 +675,7 @@ Do you want to proceed anyway? (CEO override)`);
 function Tasks({tasks,tasksDB,leads,users,currentUser}) {
   const [showAdd,setShowAdd]=useState(false);
   const [completeModal,setCompleteModal]=useState(null); // task being completed
-  const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:""});
+  const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:"",not_interested:false,not_interested_reason:""});
   const [form,setForm]=useState({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
   // ALL users see ALL tasks — but filtered by tab
   const [taskTab,setTaskTab]=useState(currentUser.role===ROLES.CEO?"all":"mine");
@@ -701,36 +701,38 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
   };
 
   // Save outcome and mark done, optionally create new reminder task
-  const saveOutcome=async()=>{
+  const saveOutcome=async(markLost=false)=>{
     if(!completeModal)return;
-    // Mark task done with outcome saved
+    const issueVal=markLost?"Not Interested":(outcome.issue||null);
+    const remarksVal=markLost?(outcome.not_interested_reason||"Not interested"):(outcome.remarks||null);
     await tasksDB.update(completeModal.id,{
       done:true,
-      outcome_issue:outcome.issue||null,
-      outcome_remarks:outcome.remarks||null,
+      outcome_issue:issueVal,
+      outcome_remarks:remarksVal,
       outcome_note:outcome.last_note||null,
       completed_at:new Date().toISOString(),
     });
-    // If next reminder set — create a new follow-up task
-    if(outcome.next_reminder){
-      await tasksDB.insert({
-        title:`Follow up: ${completeModal.client_name||completeModal.title}`,
-        client_name:completeModal.client_name,
-        lead_id:completeModal.lead_id,
-        assigned_to:completeModal.assigned_to||currentUser.id,
-        due_date:outcome.next_reminder,
-        priority:completeModal.priority||"High",
-        type:"Follow-up",
-        auto_generated:false,
-      });
-    }
-    // Also save note to lead if last_note filled
-    if(outcome.last_note&&completeModal.lead_id){
+    // If marked not interested — close the lead
+    if(markLost&&completeModal.lead_id){
+      const reason=outcome.not_interested_reason||"Not interested";
       const lead=leads.find(l=>l.id===completeModal.lead_id);
       if(lead){
-        const note={id:Date.now(),text:outcome.last_note,by:currentUser.name,at:new Date().toLocaleString(),type:"Call"};
+        const note={id:Date.now(),text:`❌ Lead closed — Not Interested. Reason: ${reason}. By: ${currentUser.name}`,by:currentUser.name,at:new Date().toLocaleString(),type:"Other"};
         const updated=[...(lead.notes||[]),note];
-        await supabase.from("leads").update({notes:updated,last_contact:tod()}).eq("id",lead.id);
+        await supabase.from("leads").update({lost:true,lost_reason:reason,status:"Lost",notes:updated,last_contact:tod()}).eq("id",lead.id);
+      }
+    } else {
+      // Normal completion — create next reminder if set
+      if(outcome.next_reminder){
+        await tasksDB.insert({title:`Follow up: ${completeModal.client_name||completeModal.title}`,client_name:completeModal.client_name,lead_id:completeModal.lead_id,assigned_to:completeModal.assigned_to||currentUser.id,due_date:outcome.next_reminder,priority:completeModal.priority||"High",type:"Follow-up",auto_generated:false});
+      }
+      if(outcome.last_note&&completeModal.lead_id){
+        const lead=leads.find(l=>l.id===completeModal.lead_id);
+        if(lead){
+          const note={id:Date.now(),text:outcome.last_note,by:currentUser.name,at:new Date().toLocaleString(),type:"Call"};
+          const updated=[...(lead.notes||[]),note];
+          await supabase.from("leads").update({notes:updated,last_contact:tod()}).eq("id",lead.id);
+        }
       }
     }
     setCompleteModal(null);
@@ -850,8 +852,22 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
             <input type="date" style={S.inp} value={outcome.next_reminder} onChange={e=>setOutcome({...outcome,next_reminder:e.target.value})} min={tod()}/>
           </Fld>
           {outcome.next_reminder&&<Alert type="info" msg={`A new follow-up task will be created for ${outcome.next_reminder}`}/>}
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={saveOutcome} style={{...S.btn(B.success),flex:1,justifyContent:"center",padding:12}}>✓ Mark Done{outcome.next_reminder?" & Set Reminder":""}</button>
+          {/* Not Interested Section */}
+          <div style={{borderTop:"2px dashed #fee2e2",paddingTop:14,marginTop:4}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#dc2626",marginBottom:8}}>❌ Not Interested? Close this lead permanently</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...S.inp,flex:1}} value={outcome.not_interested_reason} onChange={e=>setOutcome({...outcome,not_interested_reason:e.target.value})} placeholder="Reason e.g. Budget issue, not ready, visa rejected before…"/>
+            </div>
+            <button onClick={()=>{if(!outcome.not_interested_reason.trim()){alert("Please enter a reason before closing the lead.");return;}if(window.confirm(`Close ${completeModal.client_name||"this lead"} as Not Interested?
+
+Reason: ${outcome.not_interested_reason}
+
+This will move the lead to Closed Leads list.`))saveOutcome(true);}} style={{...S.btn("#dc2626"),width:"100%",justifyContent:"center",padding:10,fontSize:13}}>
+              ❌ Not Interested — Close Lead
+            </button>
+          </div>
+          <div style={{display:"flex",gap:10,marginTop:10}}>
+            <button onClick={()=>saveOutcome(false)} style={{...S.btn(B.success),flex:1,justifyContent:"center",padding:12}}>✓ Mark Done{outcome.next_reminder?" & Set Reminder":""}</button>
             <button onClick={()=>setCompleteModal(null)} style={{...S.ghost,padding:12}}>Cancel</button>
           </div>
         </Modal>
@@ -2375,13 +2391,103 @@ function TaskReminderPopup({tasks,onClose}) {
 }
 
 
+// ─── CLOSED LEADS ────────────────────────────────────────────────────────────
+function ClosedLeads({leads,leadsDB,currentUser}) {
+  const [search,setSearch]=useState("");
+  const [sel,setSel]=useState(null);
+  const closed=leads.filter(l=>l.lost).sort((a,b)=>(b.updated_at||b.created_at||"").localeCompare(a.updated_at||a.created_at||""));
+  const filtered=search.trim()?closed.filter(l=>(l.name||"").toLowerCase().includes(search.toLowerCase())||(l.phone||"").includes(search)):closed;
+
+  const restoreLead=async(lead)=>{
+    if(currentUser.role!==ROLES.CEO){alert("Only CEO can restore leads.");return;}
+    await leadsDB.update(lead.id,{lost:false,status:"New",lost_reason:null});
+    setSel(null);
+  };
+
+  const deleteLead=async(lead)=>{
+    if(currentUser.role!==ROLES.CEO){alert("Only CEO can permanently delete leads.");return;}
+    if(!window.confirm(`⚠️ PERMANENTLY DELETE ${lead.name}?
+
+This cannot be undone. All data for this lead will be lost forever.`))return;
+    if(!window.confirm(`Are you absolutely sure? This will DELETE ${lead.name} forever.`))return;
+    await supabase.from("tasks").delete().eq("lead_id",lead.id);
+    await leadsDB.remove(lead.id);
+    setSel(null);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div>
+          <h2 style={S.h2}>Closed Leads</h2>
+          <p style={S.sub}>{closed.length} closed · visible to all · editable by CEO only</p>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+        <Stat label="Total Closed" value={closed.length} color={B.danger} icon="❌"/>
+        <Stat label="This Month" value={closed.filter(l=>{const d=l.updated_at||l.created_at||"";return d.slice(0,7)===tod().slice(0,7);}).length} color={B.warn} icon="📅"/>
+        {["Budget Issue","Not Ready","Visa Rejected","Not Responding","Other"].map(reason=>{
+          const count=closed.filter(l=>(l.lost_reason||"").toLowerCase().includes(reason.toLowerCase())).length;
+          return count>0?<Stat key={reason} label={reason} value={count} color="#64748b" icon="📊"/>:null;
+        })}
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <input style={{...S.inp,width:260,margin:0}} placeholder="🔍 Search closed leads…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      </div>
+
+      <div style={{...S.card,padding:0,overflow:"hidden"}}>
+        <div style={{overflowX:"auto",maxHeight:"calc(100vh - 280px)",overflowY:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:800}}>
+            <thead><tr>{["#","Date Closed","Name","Contact","Country","Reason for Closing","Counselor",currentUser.role===ROLES.CEO?"Actions":""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {filtered.map((lead,idx)=>{
+                return (
+                  <tr key={lead.id} style={{background:"#fff5f5"}}>
+                    <td style={{...S.td,fontSize:11,color:"#9fa8da"}}>{idx+1}</td>
+                    <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.updated_at?.split("T")[0]||lead.created_at?.split("T")[0]||"—"}</td>
+                    <td style={S.td}>
+                      <div style={{fontWeight:700,color:"#7f1d1d"}}>{lead.name}</div>
+                      <div style={{fontSize:10,color:"#9fa8da"}}>{lead.phone}</div>
+                    </td>
+                    <td style={S.td}>{lead.phone}</td>
+                    <td style={S.td}>{lead.country}</td>
+                    <td style={S.td}>
+                      {lead.lost_reason?
+                        <span style={{background:"#fee2e2",color:"#dc2626",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}}>{lead.lost_reason}</span>:
+                        <span style={{color:"#9fa8da",fontSize:11}}>No reason given</span>
+                      }
+                    </td>
+                    <td style={S.td}>{lead.source||"—"}</td>
+                    {currentUser.role===ROLES.CEO&&(
+                      <td style={S.td}>
+                        <div style={{display:"flex",gap:6}}>
+                          <button onClick={()=>restoreLead(lead)} style={{...S.ghost,fontSize:11,padding:"4px 10px",color:B.success,borderColor:B.success}}>↩ Restore</button>
+                          <button onClick={()=>deleteLead(lead)} style={{...S.btn("#dc2626"),fontSize:11,padding:"4px 10px"}}>🗑 Delete Forever</button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#9fa8da"}}>No closed leads yet.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   { section:"Overview", items:[{key:"dashboard",label:"Dashboard",icon:"📊"},{key:"reporting",label:"Reports & Analytics",icon:"📈"}] },
   { section:"Counseling", items:[{key:"leads",label:"Leads Pipeline",icon:"👥"},{key:"tasks",label:"Tasks & Follow-ups",icon:"✅"}] },
   { section:"Processing", items:[{key:"processing",label:"Processing Tracker",icon:"🔄"},{key:"cases",label:"Active Cases",icon:"📋"}] },
   { section:"WhatsApp", items:[{key:"whatsapp",label:"WhatsApp Inbox",icon:"💬"},{key:"notifications",label:"Client Notifications",icon:"🔔"}] },
   { section:"Accounting", items:[{key:"invoices",label:"Invoices",icon:"🧾"},{key:"accounting",label:"Full Accounting",icon:"📒"}] },
-  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"activitylog",label:"Activity Log",icon:"🛡️"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
+  { section:"Admin", items:[{key:"bulkimport",label:"Import Clients",icon:"📤"},{key:"closedleads",label:"Closed Leads",icon:"❌"},{key:"activitylog",label:"Activity Log",icon:"🛡️"},{key:"settings",label:"Settings",icon:"⚙️",ceoOnly:true}] },
 ];
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -2462,6 +2568,7 @@ export default function App() {
       case "invoices":      return <Invoices {...props}/>;
       case "accounting":    return <Accounting {...props}/>;
       case "bulkimport":    return <BulkImport {...props}/>;
+      case "closedleads":   return <ClosedLeads {...props}/>;
       case "settings":      return <Settings {...props}/>;
       default: return null;
     }
