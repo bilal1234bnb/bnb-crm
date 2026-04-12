@@ -253,7 +253,7 @@ function useTable(tableName, options={}) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({leads,invoices,tasks,journals,accounts,currentUser}) {
+function Dashboard({leads,invoices,tasks,journals,accounts,currentUser,setPage}) {
   const rev=invoices.reduce((a,i)=>a+(i.paid||0),0);
   const pending=leads.filter(l=>l.pending_approval&&!l.approved);
   const openT=tasks.filter(t=>!t.done);
@@ -344,7 +344,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
   },[leads,tab,currentUser,search]);
 
   const pending=leads.filter(l=>l.pending_approval&&!l.approved);
-  const counselors=users.filter(u=>u.role===ROLES.COUNSELOR&&u.active);
+  const counselors=users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active);
 
   const isReminderDue=(r)=>r&&r<=tod();
   const rowHighlight=(lead)=>{
@@ -1361,7 +1361,7 @@ function Accounting({accounts,accountsDB,journals,journalsDB,bankTx,bankTxDB,sub
 function WhatsAppInbox({waLeads,waLeadsDB,leadsDB,tasksDB,users,currentUser}) {
   const [showAdd,setShowAdd]=useState(false); const [sel,setSel]=useState(null);
   const [form,setForm]=useState({name:"",phone:"",message:"",branch:currentUser.branch});
-  const counselors=users.filter(u=>u.role===ROLES.COUNSELOR&&u.active);
+  const counselors=users.filter(u=>(u.role===ROLES.COUNSELOR||u.role===ROLES.BRANCH_MANAGER)&&u.active);
   const pending=waLeads.filter(w=>!w.converted);
   const addWa=async()=>{if(!form.name||!form.phone)return;await waLeadsDB.insert({...form,converted:false});setForm({name:"",phone:"",message:"",branch:currentUser.branch});setShowAdd(false);};
   const convert=async(wa)=>{
@@ -2008,7 +2008,7 @@ Proceed to "${ns}" anyway?`);
       {/* Cases table */}
       <div style={{...S.card,overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",minWidth:1100}}>
-          <thead><tr>{["#","Date Added","Client","Country","Current Stage","Docs","Reminders","Officer",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["#","Date Added","Client","Country","University","Intake","Current Stage","Docs","Officer",""].map(h=><th key={h} style={{...S.th,fontSize:11}}>{h}</th>)}</tr></thead>
           <tbody>
             {cases.map((lead,idx)=>{
               const officer=users.find(u=>u.id===lead.assigned_to);
@@ -2024,6 +2024,8 @@ Proceed to "${ns}" anyway?`);
                   <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{lead.created_at?.split("T")[0]||"—"}</td>
                   <td style={S.td}><div style={{fontWeight:700,color:B.dark}}>{lead.name}</div><div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div></td>
                   <td style={{...S.td,minWidth:70,maxWidth:100,fontSize:11,wordBreak:"break-word"}}>{lead.country}</td>
+                  <td style={{...S.td,fontSize:11,maxWidth:120,whiteSpace:"normal",lineHeight:1.3}}>{lead.university||"—"}</td>
+                  <td style={{...S.td,fontSize:11,whiteSpace:"nowrap",color:"#5c6bc0",fontWeight:600}}>{lead.intake||"—"}</td>
                   <td style={S.td}>
                     <Pill text={lead.stage||"—"} color="#37474f" bg="#f3f4f9"/>
                     <div style={{marginTop:6,background:"#eef0fb",borderRadius:4,height:5}}>
@@ -2057,6 +2059,11 @@ Proceed to "${ns}" anyway?`);
                 <div style={{background:B.grad,borderRadius:6,height:10,width:`${pct}%`,transition:"width 0.4s"}}/>
               </div>
               <div style={{fontSize:11,color:"#9fa8da",marginTop:4}}>Stage {Math.max(idx+1,1)} of {stages.length}: <strong>{sel.stage}</strong></div>
+              <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#5c6bc0"}}>
+                {sel.university&&<span>🎓 {sel.university}</span>}
+                {sel.intake&&<span>📅 Intake: {sel.intake}</span>}
+                {sel.created_at&&<span>📌 Since: {sel.created_at?.slice(0,10)}</span>}
+              </div>
             </div>
           );})()}
 
@@ -4046,9 +4053,16 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
         <div style={{...S.card,marginBottom:20}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontSize:13,fontWeight:700,color:B.dark}}>Preview — All 56 clients</div>
-            <button onClick={runImport} style={{...S.btn(pendingCount===0?"#9fa8da":B.success),fontSize:13}} disabled={pendingCount===0}>
-              {pendingCount===0?"✅ All Imported":` Import ${pendingCount} to ACL`}
-            </button>
+            {pendingCount>0&&(
+              <button onClick={runImport} style={{...S.btn(B.success),fontSize:13}}>
+                ✅ Import {pendingCount} to ACL
+              </button>
+            )}
+            {pendingCount===0&&(
+              <div style={{background:"#d1fae5",color:"#065f46",borderRadius:10,padding:"10px 20px",fontSize:13,fontWeight:700}}>
+                ✅ All {ACL_DATA.length} clients already imported
+              </div>
+            )}
           </div>
           <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
@@ -4690,7 +4704,7 @@ export default function App() {
   const renderPage=()=>{
     if(leadsDB.loading)return <Spin/>;
     switch(page){
-      case "dashboard":     return <Dashboard {...props}/>;
+      case "dashboard":     return <Dashboard {...props} setPage={setPage}/>;
       case "leads":         return <Leads {...props}/>;
       case "cases":         return <Cases {...props} invoices={invoicesDB.data}/>;
       case "tasks":         return <Tasks {...props} leads={leadsDB.data}/>;
@@ -4747,7 +4761,7 @@ export default function App() {
       <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
         {/* Mobile: fixed top header */}
         {mob&&(
-          <div style={{position:"fixed",top:0,left:0,right:0,zIndex:600,background:B.dark,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"}}>
+          <div style={{position:"fixed",top:0,left:0,right:0,zIndex:600,background:B.dark,padding:"max(12px,env(safe-area-inset-top,12px)) 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={{width:30,height:30,borderRadius:8,background:B.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:14}}>B</div>
               <span style={{color:"#fff",fontWeight:800,fontSize:15}}>BnB CRM</span>
@@ -4815,7 +4829,7 @@ export default function App() {
               {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
             </div>
           )}
-          <div style={{flex:1,overflowY:"auto",padding:mob?"12px 12px 24px":"24px 28px 60px",marginTop:mob?"54px":"0"}}>
+          <div style={{flex:1,overflowY:"auto",padding:mob?"12px 12px 24px":"24px 28px 60px",marginTop:mob?"max(54px,calc(44px + env(safe-area-inset-top,0px)))":"0"}}>
             {/* Mobile page title */}
             {mob&&<div style={{fontSize:16,fontWeight:800,color:B.dark,marginBottom:12}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>}
             <div style={{width:"100%"}}>{renderPage()}</div>
