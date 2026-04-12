@@ -143,6 +143,15 @@ const Alert = ({type,msg}) => { const c={warn:{bg:"#fffde7",b:"#f0b429",t:"#7c51
 const Stat = ({label,value,sub,color=B.primary,icon}) => <div style={{...S.card,borderLeft:`4px solid ${color}`,padding:"16px 18px"}}><div style={{fontSize:11,color:"#7986cb",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{icon&&<span style={{marginRight:5}}>{icon}</span>}{label}</div><div style={{fontSize:22,fontWeight:800,color,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:12,color:"#9fa8da",marginTop:4}}>{sub}</div>}</div>;
 const Spin = () => <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#7986cb",fontSize:13}}>Loading…</div>;
 const isMobile = () => window.innerWidth <= 768;
+const useMobile = () => {
+  const [mobile, setMobile] = useState(isMobile());
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', h);
+    return () => window.removeEventListener('resize', h);
+  }, []);
+  return mobile;
+};
 const Modal = ({title,onClose,children,w=540}) => (
   <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(26,32,87,0.55)",zIndex:1000,display:"flex",alignItems:isMobile()?"flex-end":"center",justifyContent:"center",padding:isMobile()?0:16}}>
     <div style={{background:"#fff",borderRadius:isMobile()?"20px 20px 0 0":16,width:"100%",maxWidth:isMobile()?"100%":w,maxHeight:isMobile()?"90vh":"92vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(26,32,87,0.25)"}}>
@@ -4616,6 +4625,8 @@ const NAV = [
 export default function App() {
   const [authUser,setAuthUser]=useState(null); const [currentUser,setCurrentUser]=useState(null);
   const [page,setPage]=useState("dashboard"); const [collapsed,setCollapsed]=useState(false);
+  const mob = useMobile();
+  const [menuOpen,setMenuOpen]=useState(false);
   const [authLoading,setAuthLoading]=useState(true);
   const [showReminderPopup,setShowReminderPopup]=useState(false);
 
@@ -4734,17 +4745,32 @@ export default function App() {
         }
       `}</style>
       <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
-        {/* Mobile top header */}
-        <div className="mobile-header" style={{position:"fixed",top:0,left:0,right:0,zIndex:600,background:B.dark,padding:"10px 16px",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:28,height:28,borderRadius:7,background:B.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:13}}>B</div>
-            <span style={{color:"#fff",fontWeight:800,fontSize:14}}>BnB CRM</span>
+        {/* Mobile: fixed top header */}
+        {mob&&(
+          <div style={{position:"fixed",top:0,left:0,right:0,zIndex:600,background:B.dark,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.3)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:30,height:30,borderRadius:8,background:B.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:14}}>B</div>
+              <span style={{color:"#fff",fontWeight:800,fontSize:15}}>BnB CRM</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>{currentUser.name}</span>
+              <button onClick={()=>setMenuOpen(p=>!p)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 10px",color:"#fff",fontSize:18,cursor:"pointer"}}>{menuOpen?"✕":"☰"}</button>
+            </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>{currentUser.name}</span>
-          </div>
-        </div>
-        <div className="sidebar-wrap" style={{width:collapsed?64:240,background:B.grad,display:"flex",flexDirection:"column",transition:"width 0.2s",flexShrink:0,overflow:"hidden"}}>
+        )}
+        {/* Mobile: overlay when menu open */}
+        {mob&&menuOpen&&<div onClick={()=>setMenuOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:498}}/>}
+        {/* Sidebar — desktop: fixed left | mobile: slide-in from left */}
+        <div style={mob?{
+          position:"fixed",top:0,left:0,bottom:0,width:280,
+          background:B.grad,display:"flex",flexDirection:"column",
+          zIndex:499,transform:menuOpen?"translateX(0)":"translateX(-100%)",
+          transition:"transform 0.28s ease",overflowY:"auto",
+        }:{
+          width:collapsed?64:240,flexShrink:0,
+          background:B.grad,display:"flex",flexDirection:"column",
+          transition:"width 0.2s",overflow:"hidden",
+        }}>
           <div style={{padding:collapsed?"16px 14px":"20px 18px 16px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
             {!collapsed?(
               <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -4763,7 +4789,7 @@ export default function App() {
                   const active=page===item.key;
                   const badge=item.key==="leads"&&pendingCount>0?pendingCount:item.key==="tasks"&&overdueCount>0?overdueCount:item.key==="whatsapp"&&waUnread>0?waUnread:item.key==="processing"&&leadsDB.data.filter(l=>l.list==="ACL"&&!l.lost).length>0?leadsDB.data.filter(l=>l.list==="ACL"&&!l.lost).length:0;
                   return(
-                    <button key={item.key} className="nb" onClick={()=>setPage(item.key)} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:collapsed?"10px 14px":"9px 12px",borderRadius:10,border:"none",background:active?"rgba(255,255,255,0.18)":"transparent",color:active?"#fff":"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:13,fontWeight:active?700:500,marginBottom:2,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",transition:"background 0.15s"}}>
+                    <button key={item.key} className="nb" onClick={()=>{setPage(item.key);if(mob)setMenuOpen(false);}} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:mob?"12px 16px":collapsed?"10px 14px":"9px 12px",borderRadius:10,border:"none",background:active?"rgba(255,255,255,0.18)":"transparent",color:active?"#fff":"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:mob?14:13,fontWeight:active?700:500,marginBottom:2,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",transition:"background 0.15s"}}>
                       <span style={{fontSize:16,flexShrink:0}}>{item.icon}</span>
                       {!collapsed&&<span style={{flex:1}}>{item.label}</span>}
                       {!collapsed&&badge>0&&<span style={{background:"#f43f5e",color:"#fff",borderRadius:10,fontSize:10,fontWeight:800,padding:"1px 6px"}}>{badge}</span>}
@@ -4779,13 +4805,19 @@ export default function App() {
             <button onClick={()=>setCollapsed(!collapsed)} style={{width:"100%",padding:"7px",background:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>{collapsed?"›":"‹ Collapse"}</button>
           </div>
         </div>
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div style={{background:"#fff",borderBottom:"1px solid #e8eaf6",padding:"11px 26px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-            <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>
-            {overdueCount>0&&<button onClick={()=>setShowReminderPopup(p=>!p)} style={{background:"#fee2e2",border:"1px solid #dc2626",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7f1d1d",fontWeight:700,cursor:"pointer"}}>🔔 {overdueCount} task{overdueCount>1?"s":""} overdue</button>}
-            {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
-          </div>
-          <div className="main-wrap" style={{flex:1,overflowY:"auto",padding:"24px 28px 60px"}}>
+        {/* Main content */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",marginLeft:mob?0:undefined}}>
+          {/* Top bar — hidden on mobile (we have the header) */}
+          {!mob&&(
+            <div style={{background:"#fff",borderBottom:"1px solid #e8eaf6",padding:"11px 26px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+              <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>
+              {overdueCount>0&&<button onClick={()=>setShowReminderPopup(p=>!p)} style={{background:"#fee2e2",border:"1px solid #dc2626",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7f1d1d",fontWeight:700,cursor:"pointer"}}>🔔 {overdueCount} task{overdueCount>1?"s":""} overdue</button>}
+              {pendingCount>0&&currentUser.role===ROLES.CEO&&<div style={{background:"#fef3c7",border:"1px solid #f0b429",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#7c5100",fontWeight:700}}>⏳ {pendingCount} pending</div>}
+            </div>
+          )}
+          <div style={{flex:1,overflowY:"auto",padding:mob?"12px 12px 24px":"24px 28px 60px",marginTop:mob?"54px":"0"}}>
+            {/* Mobile page title */}
+            {mob&&<div style={{fontSize:16,fontWeight:800,color:B.dark,marginBottom:12}}>{NAV.flatMap(s=>s.items).find(i=>i.key===page)?.icon} {NAV.flatMap(s=>s.items).find(i=>i.key===page)?.label}</div>}
             <div style={{width:"100%"}}>{renderPage()}</div>
           </div>
         </div>
