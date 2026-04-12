@@ -677,9 +677,14 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
   const [completeModal,setCompleteModal]=useState(null); // task being completed
   const [outcome,setOutcome]=useState({issue:"",remarks:"",last_note:"",next_reminder:""});
   const [form,setForm]=useState({title:"",client_name:"",assigned_to:currentUser.id,due_date:"",priority:"High",type:"Follow-up"});
-  const mine=tasks.filter(t=>currentUser.role===ROLES.CEO||t.assigned_to===currentUser.id);
-  const open=mine.filter(t=>!t.done).sort((a,b)=>{if(a.due_date<tod()&&b.due_date>=tod())return -1;if(b.due_date<tod()&&a.due_date>=tod())return 1;return(a.due_date||"").localeCompare(b.due_date||"");});
-  const done=mine.filter(t=>t.done);
+  // ALL users see ALL tasks — but filtered by tab
+  const [taskTab,setTaskTab]=useState("mine");
+  const allOpen=tasks.filter(t=>!t.done).sort((a,b)=>{if(a.due_date<tod()&&b.due_date>=tod())return -1;if(b.due_date<tod()&&a.due_date>=tod())return 1;return(a.due_date||"").localeCompare(b.due_date||"");});
+  const myOpen=allOpen.filter(t=>t.assigned_to===currentUser.id);
+  const teamOpen=allOpen.filter(t=>t.assigned_to!==currentUser.id);
+  const open=taskTab==="mine"?myOpen:taskTab==="team"?teamOpen:allOpen;
+  const done=tasks.filter(t=>t.done).sort((a,b)=>(b.completed_at||b.created_at||"").localeCompare(a.completed_at||a.created_at||""));
+  const canEdit=(task)=>currentUser.role===ROLES.CEO||task.assigned_to===currentUser.id;
 
   // Get last note for a client from leads
   const getLastNote=(clientName)=>{
@@ -733,26 +738,38 @@ function Tasks({tasks,tasksDB,leads,users,currentUser}) {
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <div><h2 style={S.h2}>Tasks & Follow-ups</h2><p style={S.sub}>{open.length} open · {open.filter(t=>t.due_date<tod()).length} overdue</p></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div><h2 style={S.h2}>Tasks & Follow-ups</h2><p style={S.sub}>{allOpen.length} total open · {myOpen.length} mine · {myOpen.filter(t=>t.due_date<tod()).length} overdue</p></div>
         <button style={S.btn("#7c3aed")} onClick={()=>setShowAdd(true)}>+ Add Task</button>
+      </div>
+      {/* Task tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {[["mine",`My Tasks (${myOpen.length})`,currentUser.role===ROLES.CEO?"#2d3a8c":"#7c3aed"],["team",`Team Tasks (${teamOpen.length})`,"#1a91c7"],["all",`All Tasks (${allOpen.length})`,"#059669"]].map(([k,l,c])=>(
+          <button key={k} onClick={()=>setTaskTab(k)} style={{padding:"7px 16px",borderRadius:8,border:`2px solid ${taskTab===k?c:"#c5cae9"}`,background:taskTab===k?c:"#fff",color:taskTab===k?"#fff":c,fontSize:13,fontWeight:700,cursor:"pointer"}}>{l}</button>
+        ))}
       </div>
       <div style={{display:"grid",gap:9,marginBottom:20}}>
         {open.map(t=>{
           const od=t.due_date&&t.due_date<tod();
           const lastNote=t.client_name?getLastNote(t.client_name):null;
           return(
-            <div key={t.id} style={{...S.card,padding:"12px 16px",borderLeft:`4px solid ${od?B.danger:priC[t.priority]||"#94a3b8"}`}}>
+            <div key={t.id} style={{...S.card,padding:"12px 16px",borderLeft:`4px solid ${od?B.danger:priC[t.priority]||"#94a3b8"}`,opacity:canEdit(t)?1:0.85}}>
               <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                {/* Checkbox */}
-                <button onClick={()=>openComplete(t)} style={{width:22,height:22,borderRadius:6,border:`2px solid ${od?B.danger:"#c5cae9"}`,background:"#fff",cursor:"pointer",flexShrink:0,marginTop:2}}/>
+                {/* Checkbox - only clickable by assigned person or CEO */}
+                <button 
+                  onClick={()=>canEdit(t)?openComplete(t):null} 
+                  title={canEdit(t)?"Mark as done":"Only "+((users.find(u=>u.id===t.assigned_to)?.name)||"assigned person")+" can complete this"}
+                  style={{width:22,height:22,borderRadius:6,border:`2px solid ${od?B.danger:canEdit(t)?"#c5cae9":"#e0e0e0"}`,background:canEdit(t)?"#fff":"#f5f5f5",cursor:canEdit(t)?"pointer":"not-allowed",flexShrink:0,marginTop:2}}/>
                 <div style={{flex:1}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:B.dark}}>{t.title}{t.auto_generated&&<span style={{fontSize:10,color:"#9fa8da",marginLeft:6}}>🤖</span>}</div>
-                      <div style={{fontSize:11,color:"#9fa8da",marginTop:2}}>
+                      <div style={{fontSize:11,color:"#9fa8da",marginTop:2,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                         {t.client_name&&<span style={{fontWeight:600,color:"#5c6bc0"}}>{t.client_name} · </span>}
                         <span style={{color:od?"#dc2626":"#9fa8da",fontWeight:od?700:400}}>{od?`⚠️ Overdue since ${t.due_date}`:`Due: ${t.due_date||"—"}`}</span>
+                        {/* Assigned person badge */}
+                        {(()=>{const assignee=users.find(u=>u.id===t.assigned_to);return assignee?<span style={{background:assignee.id===currentUser.id?"#e8eaf6":"#f3e8ff",color:assignee.id===currentUser.id?"#3949ab":"#7c3aed",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>👤 {assignee.name}</span>:null;})()}
+                        {!canEdit(t)&&<span style={{background:"#fee2e2",color:"#dc2626",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700}}>🔒 View only</span>}
                       </div>
                     </div>
                     <Pill text={t.priority} color={priC[t.priority]||"#64748b"} bg={t.priority==="High"?"#fce4ec":t.priority==="Medium"?"#fffde7":"#f8f9ff"}/>
