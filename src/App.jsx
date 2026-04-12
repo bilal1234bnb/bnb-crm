@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-// v6
 import { supabase } from "./supabase.js";
 
 // ─── BRAND ───────────────────────────────────────────────────────────────────
@@ -2515,4 +2514,3 @@ export default function App() {
     </>
   );
 }
-// V6
