@@ -3880,17 +3880,17 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           </div>
           <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
-              <thead><tr>{["#","Name","Country","University","Intake","Stage","Source","Commission"].map(h=><th key={h} style={{...S.th,fontSize:11}}/>{h}</th>)}</tr></thead>
+              <thead><tr>{["#","Name","Country","University","Intake","Stage","Source","Commission"].map(h=><th key={h} style={{...S.th,fontSize:11}}>{h}</th>)}</tr></thead>
               <tbody>
                 {ACL_DATA.map((c,i)=>{
                   const [sc,sb]=stageColor[c.processing_stage]||["#374151","#f3f4f9"];
                   return (
                     <tr key={i}>
-                      <td style={{...S.td,fontSize:11,color:"#9fa8da"}}/>{i+1}</td>
-                      <td style={{...S.td,fontWeight:700}}/>{c.name}</td>
-                      <td style={{...S.td,fontSize:11}}/>{c.country}</td>
-                      <td style={{...S.td,fontSize:11,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}/>{c.university}</td>
-                      <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}/>{c.intake}</td>
+                      <td style={{...S.td,fontSize:11,color:"#9fa8da"}}>{i+1}</td>
+                      <td style={{...S.td,fontWeight:700}}>{c.name}</td>
+                      <td style={{...S.td,fontSize:11}}>{c.country}</td>
+                      <td style={{...S.td,fontSize:11,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.university}</td>
+                      <td style={{...S.td,fontSize:11,whiteSpace:"nowrap"}}>{c.intake}</td>
                       <td style={{...S.td}}><Pill text={c.processing_stage} color={sc} bg={sb}/></td>
                       <td style={{...S.td,fontSize:11}}>
                         {c.source_type==="external_agent"&&<Pill text={`B2B: ${c.external_agent_name}`} color={"#7c3aed"} bg={"#f3e8ff"}/>}
@@ -3934,7 +3934,7 @@ function ACLImport({leadsDB,tasksDB,currentUser}) {
           <div style={{...S.card,maxHeight:400,overflowY:"auto"}}>
             {results.map((r,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f9",fontSize:12}}>
-                <span style={{fontWeight:600}}/>{r.name}</span>
+                <span style={{fontWeight:600}}>{r.name}</span>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   {r.stage&&<Pill text={r.stage} color={stageColor[r.stage]?.[0]||"#374151"} bg={stageColor[r.stage]?.[1]||"#f3f4f9"}/>}
                   <Pill text={r.status} color={r.status==="imported"?B.success:r.status==="skipped"?B.warn:B.danger} bg={r.status==="imported"?"#d1fae5":r.status==="skipped"?"#fef3c7":"#fee2e2"}/>
