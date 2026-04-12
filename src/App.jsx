@@ -677,7 +677,7 @@ Do you want to proceed anyway? (CEO override)`);
       <div style={{marginBottom:18}}><h2 style={S.h2}>Active Cases (ACL)</h2><p style={S.sub}>{acl.length} active cases</p></div>
       <div style={S.card}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>{["Client","Country","Stage","Docs","Branch",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Client","Country","University","Intake","Start Date","Stage","Docs",""].map(h=><th key={h} style={{...S.th,fontSize:11}}>{h}</th>)}</tr></thead>
           <tbody>
             {acl.map(lead=>(
               <tr key={lead.id}>
@@ -686,7 +686,10 @@ Do you want to proceed anyway? (CEO override)`);
                   <div style={{fontSize:11,color:"#9fa8da"}}>{lead.phone}</div>
                   {(()=>{const inv=(invoices||[]).filter(i=>i.client_name===lead.name);const paid=inv.reduce((a,i)=>a+(i.paid||0),0);const billed=inv.reduce((a,i)=>a+(i.amount||0),0);if(inv.length===0)return <span style={{fontSize:10,background:"#fee2e2",color:"#dc2626",borderRadius:4,padding:"1px 6px",fontWeight:700}}>⚠️ No Invoice</span>;if(paid>=billed)return <span style={{fontSize:10,background:"#d1fae5",color:"#065f46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>✓ Paid</span>;return <span style={{fontSize:10,background:"#fef3c7",color:"#7c5100",borderRadius:4,padding:"1px 6px",fontWeight:700}}>⏳ {Math.round((paid/Math.max(billed,1))*100)}% Paid</span>;})()}
                 </td>
-                <td style={S.td}>{lead.country}<div style={{fontSize:11,color:"#9fa8da"}}>{lead.intake_target}</div></td>
+                <td style={{...S.td,fontSize:11}}>{lead.country}</td>
+                <td style={{...S.td,fontSize:11,maxWidth:130,whiteSpace:"normal",lineHeight:1.3,color:"#5c6bc0"}}>{lead.university||lead.intake_target||"—"}</td>
+                <td style={{...S.td,fontSize:11,whiteSpace:"nowrap",fontWeight:600,color:"#7c3aed"}}>{lead.intake||"—"}</td>
+                <td style={{...S.td,fontSize:11,whiteSpace:"nowrap",color:"#9fa8da"}}>{lead.created_at?.slice(0,10)||"—"}</td>
                 <td style={S.td}><Pill text={lead.stage} color="#37474f" bg="#f3f4f9"/></td>
                 <td style={S.td}>{lead.all_doc_received?<span style={{color:B.success,fontWeight:700,fontSize:12}}>Complete ✓</span>:<span style={{color:B.warn,fontSize:12}}>Pending</span>}</td>
                 <td style={S.td}><span style={{fontSize:12}}>{lead.branch?.split(" ")[0]}</span></td>
