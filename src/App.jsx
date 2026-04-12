@@ -1,3 +1,4 @@
+// BnB CRM v2026-04-12-final
 import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
@@ -699,7 +700,7 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
             </th>
           ))}</tr></thead>
           <tbody>
-            {filtered.map((lead,idx)=>{
+            {paginated.map((lead,idx)=>{
               const counselor=users.find(u=>u.id===lead.assigned_to);
               return (
                 <tr key={lead.id} style={rowHighlight(lead)}>
@@ -3583,7 +3584,7 @@ This cannot be undone. All data for this lead will be lost forever.`))return;
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:800}}>
             <thead><tr>{["#","Date Closed","Name","Contact","Country","Reason for Closing","Counselor",currentUser.role===ROLES.CEO?"Actions":""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
             <tbody>
-              {filtered.map((lead,idx)=>{
+              {paginated.map((lead,idx)=>{
                 return (
                   <tr key={lead.id} style={{background:"#fff5f5"}}>
                     <td style={{...S.td,fontSize:11,color:"#9fa8da"}}>{idx+1}</td>
