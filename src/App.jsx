@@ -599,6 +599,8 @@ function Leads({leads,leadsDB,tasks,tasksDB,users,agents,currentUser,settings}) 
 function Cases({leads,leadsDB,tasksDB,invoices,currentUser}) {
   const [sel,setSel]=useState(null);
   const [caseFile,setCaseFile]=useState(null);
+  const [showLogForm,setShowLogForm]=useState(false);
+  const [logForm,setLogForm]=useState({type:"Processing",text:"",date:tod()});
   const acl=leads.filter(l=>l.list==="ACL"&&!l.lost);
   const changeStage=async(lead,ns,invoices)=>{
     // Gate 1: Docs required before Application
@@ -919,7 +921,9 @@ function Accounting({accounts,accountsDB,journals,journalsDB,bankTx,bankTxDB,sub
   const [showSubAcc,setShowSubAcc]=useState(false);
   const [jvLines,setJvLines]=useState([{account:"",sub_account_id:"",sub_account_name:"",dr:0,cr:0},{account:"",sub_account_id:"",sub_account_name:"",dr:0,cr:0}]);
   const [jvNarr,setJvNarr]=useState("");
-  const [caseFile,setCaseFile]=useState(null); const [jvDate,setJvDate]=useState(tod());
+  const [caseFile,setCaseFile]=useState(null);
+  const [showLogForm,setShowLogForm]=useState(false);
+  const [logForm,setLogForm]=useState({type:"Processing",text:"",date:tod()}); const [jvDate,setJvDate]=useState(tod());
   const [selLedger,setSelLedger]=useState("");
   const [subForm,setSubForm]=useState({code:"",name:"",type:"Debtor",control_account:"1300",phone:"",email:""});
   const fileRef=useRef();
@@ -1843,6 +1847,8 @@ function BulkImport({leadsDB,tasksDB,currentUser}) {
 function Processing({leads,leadsDB,tasksDB,users,invoices:invoicesProp,currentUser}) {
   const [search,setSearch]=useState("");
   const [caseFile,setCaseFile]=useState(null);
+  const [showLogForm,setShowLogForm]=useState(false);
+  const [logForm,setLogForm]=useState({type:"Processing",text:"",date:tod()});
   const [sel,setSel]=useState(null);
   const [filterCountry,setFilterCountry]=useState("All");
   const [filterStage,setFilterStage]=useState("All");
@@ -1898,6 +1904,11 @@ Proceed to "${ns}" anyway?`);
     const taskTitle=`${lead.name}: Stage → "${ns}"`;
     await tasksDB.insert({title:taskTitle,client_name:lead.name,lead_id:lead.id,assigned_to:lead.assigned_to||currentUser.id,due_date:tod(),priority:"High",type:"Processing",auto_generated:true});
     setSel(p=>p?{...p,stage:ns}:p);
+    // Add auto-log entry to lead notes
+    const stageNote={id:Date.now(),text:`Stage changed to: "${ns}"`,by:currentUser.name,at:new Date().toLocaleString(),type:"Processing",date:tod()};
+    const updatedNotes=[...(lead.notes||[]),stageNote];
+    await leadsDB.update(lead.id,{notes:updatedNotes});
+    setSel(p=>p?{...p,notes:updatedNotes}:p);
   };
 
   const toggleDoc=async(lead,doc)=>{
@@ -2002,7 +2013,7 @@ Proceed to "${ns}" anyway?`);
       {sel&&(
         <Modal title={`Processing: ${sel.name} · ${sel.country}`} onClose={()=>setSel(null)} w={720}>
           {/* Progress bar */}
-          {(()=>{const stages=getStages(sel.country);const idx=stages.indexOf(sel.stage);const pct=stages.length>0?Math.round((Math.max(idx,0)/stages.length)*100):0;return(
+          {(()=>{const stages=getStages(sel.country);const idx=stages.indexOf(sel.stage);const pct=stages.length>0?Math.round(((idx+1)/stages.length)*100):0;return(
             <div style={{marginBottom:16}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                 <span style={{fontSize:12,color:"#5c6bc0",fontWeight:700}}>Processing Progress</span>
@@ -2021,18 +2032,40 @@ Proceed to "${ns}" anyway?`);
               <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Move to Stage</div>
               <div style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
                 {(getStages(sel.country)).map(stage=>(
-                  <button key={stage} onClick={()=>changeStage(sel,stage,invoices)} style={{textAlign:"left",padding:"7px 10px",borderRadius:7,border:"1px solid",borderColor:sel.stage===stage?B.primary:"#e8eaf6",background:sel.stage===stage?B.light:"#f8f9ff",color:sel.stage===stage?B.primary:"#37474f",fontSize:11,fontWeight:sel.stage===stage?700:400,cursor:"pointer"}}>{stage}</button>
+                  <button key={stage} onClick={()=>changeStage(sel,stage)} style={{textAlign:"left",padding:"7px 10px",borderRadius:7,border:"1px solid",borderColor:sel.stage===stage?B.primary:"#e8eaf6",background:sel.stage===stage?B.light:"#f8f9ff",color:sel.stage===stage?B.primary:"#37474f",fontSize:11,fontWeight:sel.stage===stage?700:400,cursor:"pointer"}}>{stage}</button>
                 ))}
               </div>
             </div>
 
-            {/* Document checklist */}
+            {/* Document checklist — split into received / pending */}
             <div style={{...S.card,padding:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>Document Checklist</div>
-              <div style={{maxHeight:220,overflowY:"auto"}}>
-                {(getDocs(sel.country)).map(doc=>(
-                  <Chk key={doc} label={doc} checked={sel.docs?.[`doc_${doc}`]||false} onChange={()=>toggleDoc(sel,doc)}/>
-                ))}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:B.dark}}>Document Checklist</div>
+                <div style={{display:"flex",gap:6}}>
+                  {(()=>{const a=getDocs(sel.country)||[];const r=a.filter(d=>sel.docs?.[`doc_${d}`]);return(<><span style={{background:"#d1fae5",color:"#065f46",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700}}>✅ {r.length}</span><span style={{background:"#fee2e2",color:"#dc2626",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700}}>⏳ {a.length-r.length}</span></>);})()}
+                </div>
+              </div>
+              <div style={{maxHeight:280,overflowY:"auto"}}>
+                {(()=>{
+                  const allDocs=getDocs(sel.country)||[];
+                  const pending=allDocs.filter(d=>!sel.docs?.[`doc_${d}`]);
+                  const received=allDocs.filter(d=>sel.docs?.[`doc_${d}`]);
+                  return (<>
+                    {pending.length>0&&(
+                      <div style={{marginBottom:10}}>
+                        <div style={{fontSize:10,fontWeight:800,color:"#dc2626",textTransform:"uppercase",marginBottom:6,padding:"3px 8px",background:"#fee2e2",borderRadius:6,display:"inline-block"}}>⏳ Pending — {pending.length}</div>
+                        {pending.map(doc=><Chk key={doc} label={doc} checked={false} onChange={()=>toggleDoc(sel,doc)}/>)}
+                      </div>
+                    )}
+                    {received.length>0&&(
+                      <div>
+                        <div style={{fontSize:10,fontWeight:800,color:"#059669",textTransform:"uppercase",marginBottom:6,padding:"3px 8px",background:"#d1fae5",borderRadius:6,display:"inline-block"}}>✅ Received — {received.length}</div>
+                        {received.map(doc=><Chk key={doc} label={doc} checked={true} onChange={()=>toggleDoc(sel,doc)}/>)}
+                      </div>
+                    )}
+                    {allDocs.length===0&&<div style={{fontSize:12,color:"#9fa8da",textAlign:"center",padding:12}}>No documents configured for this country.</div>}
+                  </>);
+                })()}
               </div>
             </div>
           </div>
@@ -2072,7 +2105,37 @@ Proceed to "${ns}" anyway?`);
 
           {/* Communication Log inside Processing */}
           <div style={{...S.card,padding:14,marginBottom:0}}>
-            <div style={{fontSize:12,fontWeight:700,color:B.dark,marginBottom:10}}>📞 Full Communication Log</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:700,color:B.dark}}>📞 Full Communication Log</div>
+              <button onClick={()=>setShowLogForm(p=>!p)} style={{...S.btn("#1a91c7"),fontSize:11,padding:"4px 12px"}}>+ Add Entry</button>
+            </div>
+            {showLogForm&&(
+              <div style={{background:"#f0f9ff",borderRadius:10,padding:14,marginBottom:14}}>
+                <R2>
+                  <Fld label="Type">
+                    <select style={S.sel} value={logForm.type} onChange={e=>setLogForm({...logForm,type:e.target.value})}>
+                      {["Call","WhatsApp","Email","Walk-in","Processing","Other"].map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </Fld>
+                  <Fld label="Date"><input type="date" style={S.inp} value={logForm.date} onChange={e=>setLogForm({...logForm,date:e.target.value})}/></Fld>
+                </R2>
+                <Fld label="Note">
+                  <textarea style={{...S.inp,minHeight:70,resize:"vertical"}} value={logForm.text} onChange={e=>setLogForm({...logForm,text:e.target.value})} placeholder="What happened? What was discussed?"/>
+                </Fld>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={async()=>{
+                    if(!logForm.text.trim())return;
+                    const note={id:Date.now(),text:logForm.text.trim(),by:currentUser.name,at:new Date().toLocaleString(),type:logForm.type,date:logForm.date};
+                    const updated=[...(sel.notes||[]),note];
+                    await leadsDB.update(sel.id,{notes:updated,last_contact:tod()});
+                    setSel(p=>({...p,notes:updated}));
+                    setLogForm({type:"Processing",text:"",date:tod()});
+                    setShowLogForm(false);
+                  }} style={{...S.btn("#1a91c7"),padding:"7px 16px"}}>Save Entry</button>
+                  <button onClick={()=>setShowLogForm(false)} style={S.ghost}>Cancel</button>
+                </div>
+              </div>
+            )}
             <div style={{maxHeight:220,overflowY:"auto"}}>
               {[...(sel.notes||[])].reverse().map(note=>{
                 const typeColors={Call:{c:"#059669",bg:"#d1fae5",icon:"📞"},WhatsApp:{c:"#25d366",bg:"#dcfce7",icon:"💬"},Email:{c:"#1a91c7",bg:"#dbeafe",icon:"📧"},"Walk-in":{c:"#7c3aed",bg:"#ede9fe",icon:"🚶"},Other:{c:"#64748b",bg:"#f1f5f9",icon:"📝"},Processing:{c:"#1a91c7",bg:"#dbeafe",icon:"⚙️"}};
