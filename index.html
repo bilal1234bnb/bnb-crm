@@ -2,18 +2,48 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Border and Bridges — CRM</title>
-    <meta name="description" content="Border and Bridges Pvt. Ltd. — Immigration and Legal Consultants" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' stroke='%231a91c7' stroke-width='5' fill='%231a2057'/><path d='M32 50 Q42 33 50 38 Q58 33 68 50' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round'/></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="application-name" content="BnB CRM">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="BnB CRM">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#2d3a8c">
+    <meta name="msapplication-TileColor" content="#2d3a8c">
+    
+    <!-- PWA Icons -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+    
+    <!-- Mobile CSS -->
+    <link rel="stylesheet" href="/mobile.css">
+    
+    <title>Border and Bridges CRM</title>
+    
+    <!-- Prevent flash of unstyled content -->
     <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Segoe UI', sans-serif; background: #f0f2fd; }
-      #root { height: 100vh; }
+      html, body { margin: 0; padding: 0; height: 100%; background: #f0f2fd; }
+      #root { height: 100%; }
+      * { box-sizing: border-box; }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Register Service Worker -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(r => console.log('SW registered:', r.scope))
+            .catch(e => console.log('SW error:', e));
+        });
+      }
+    </script>
   </body>
 </html>
